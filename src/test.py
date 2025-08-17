@@ -70,33 +70,44 @@ def get_financial_indicators(stock_code):
         # 打印验证
         print(f"{stock_code} 最新数据 - 日期：{latest_date}，PB：{latest_pb}")
 
-        
-        # 提取指标名称列（第一列）和指标值列（第二列）
-        indicator_names = df.iloc[:, 0].str.lower()  # 转为小写，忽略大小写
-        indicator_values = df.iloc[:, 1]
-        
-        # 2. 匹配净资产收益率（支持“净资产收益率”“roe”等表述）
-        roe_mask = indicator_names.str.contains('净资产收益率|roe', na=False)
-        roe_rows = df[roe_mask]
-        if roe_rows.empty:
-            print(f"{stock_code} 未找到净资产收益率相关指标")
+        # PB有效性校验（排除非数字、NaN、范围外）
+        if not (isinstance(latest_pb, (float, int)) and not np.isnan(latest_pb)):
+            print(f"{stock_code} PB数据无效（{latest_pb}），跳过")
             return None
-        
-        # 提取数值（处理百分号和特殊符号）
-        pb_str =latest_pb
-        roe_str = roe_rows.iloc[0, 1].replace('%', '').replace('--', '').strip()
-        
-        # 过滤无效值（如空字符串、非数字）
-        if not pb_str or not roe_str or not pb_str.replace('.', '').isdigit() or not roe_str.replace('.', '').isdigit():
+        if not (pb_min <= latest_pb <= pb_max):
+            print(f"{stock_code} PB不达标（{latest_pb}），跳过ROE查询")
+            return None
 
-            print(f"{stock_code} PB或ROE为无效值（PB: {pb_str}, ROE: {roe_str}）")
+       #2, 调用接口获取指定日期的业绩报表数据
+        df = ak.stock_yjbb_em(date="20250331")
+       # 根据股票代码筛选数据（精确匹配）
+        target_data = df[df["股票代码"] == stock_code]
+        
+        if not target_data.empty:
+            # 提取"净资产收益率"列的值（取第一行结果）
+            roe = target_data["净资产收益率"].iloc[0]
+            roe = round(roe, 4)  # 保留4位小数
+        else:
+            print(f"未找到股票代码 {stock_code} 在 20250331 的业绩数据")
             return None
+
+        if roe is not None:
+            print(f"股票 {stock_code} 在 20250331 的净资产收益率（ROE）为：{roe}%")
         
-        # 转换为浮点数
-        pb = float(pb_str)
-        roe = float(roe_str)
-        
-        return {'pb': pb, 'roe': roe}
+        # 直接验证数值有效性（无需转字符串，数值类型本身可判断）
+        # 排除非数值（如NaN、None）和无效范围（ROE为负等，根据需求调整）
+#        if not (isinstance(latest_pb, (int, float, np.number)) and isinstance(roe, (int, float, np.number))):
+ #           print(f"{stock_code} PB或ROE不是有效数值（PB: {latest_pb}, ROE: {roe}）")
+  #          return None
+# ROE有效性校验
+        if not (isinstance(roe, (float, int)) and not np.isnan(roe)):
+            print(f"{stock_code} ROE数据无效（{roe}），跳过")
+            return None
+        if not (roe_min <= roe <= roe_max):
+            print(f"{stock_code} ROE不达标（{roe}），跳过")
+            return None
+
+        return {'pb': latest_pb, 'roe': roe}
     
     except Exception as e:
         print(f"{stock_code} 财务数据获取失败：{e}")
@@ -124,9 +135,9 @@ def filter_stocks(stock_list):
         roe = financial_data['roe']
         
         # 财务指标不在范围内，直接跳过（不进入价格检查）
-        if not (pb_min <= pb <= pb_max and roe_min <= roe <= roe_max):
-            print(f"{code} 财务指标不达标（PB: {pb}, ROE: {roe}），跳过")
-            continue
+    #    if not (pb_min <= pb <= pb_max and roe_min <= roe <= roe_max):
+     #       print(f"{code} 财务指标不达标（PB: {pb}, ROE: {roe}），跳过")
+      #      continue
         
         # 第二步：财务指标达标后，再检查价格是否连续两年下跌
         price_df = get_price_history(code)
