@@ -1,182 +1,130 @@
 import akshare as ak
 import pandas as pd
-import numpy as np
-from datetime import datetime, timedelta
-import time
 
-# --------------------------
-# 1. 基础参数设置
-# --------------------------
-current_date = datetime.now().strftime("%Y%m%d")
-one_year_ago = (datetime.now() - timedelta(days=365)).strftime("%Y%m%d")
-two_year_ago = (datetime.now() - timedelta(days=365*2)).strftime("%Y%m%d")
+def format_code(code: str) -> str:
+    """补全交易所前缀"""
+    if code.startswith(("sh", "sz")):
+        return code
+    elif code.startswith("6"):
+        return "sh" + code
+    else:
+        return "sz" + code
 
-pb_min, pb_max = 0.6, 1.6  # 市净率范围
-roe_min, roe_max = 1, 7    # 净资产收益率范围（%）
-
-
-# --------------------------
-# 2. 工具函数（与之前一致，复用）
-# --------------------------
-def get_stock_list():
-    """获取A股股票列表（去重处理）"""
-    try:
-        stock_df = ak.stock_zh_a_spot_em()
-        stock_df = stock_df[['代码', '名称']]
-        # 过滤股票代码（6/0/3开头）并去重
-        stock_df = stock_df[stock_df['代码'].str.match(r'^6|^0|^3')].drop_duplicates(subset=['代码'])
-        return stock_df
-    except Exception as e:
-        print(f"获取股票列表失败：{e}")
-        return pd.DataFrame()
-
-
-def get_price_history(stock_code):
-    """获取个股过去2年的价格数据（前复权）"""
+def get_stock_data(stock_code, start_date, end_date):
+    """获取股票历史数据（修复日期列名问题）"""
     try:
         df = ak.stock_zh_a_hist(
             symbol=stock_code,
             period="daily",
-            start_date=two_year_ago,
-            end_date=current_date,
+            start_date=start_date,
+            end_date=end_date,
             adjust="qfq"  # 前复权
         )
-        df['日期'] = pd.to_datetime(df['日期'])
-        df = df.sort_values('日期').set_index('日期')
-        return df[['收盘']]
+        # 关键：打印列名，确认日期列实际名称（比如可能是"date"而不是"日期"）
+        print(f"{stock_code} 的数据列名：{df.columns.tolist()}")
+        
+        # 根据实际列名修改（假设日期列是"date"，如果是其他名称替换即可）
+        date_col = "date"  # 这里替换为打印出的实际日期列名
+        if date_col not in df.columns:
+            # 保险起见，再尝试常见的列名（比如"trade_date"）
+            date_col = "trade_date" if "trade_date" in df.columns else df.columns[0]
+        
+        # 转换日期格式并统一列名为"日期"
+        df[date_col] = pd.to_datetime(df[date_col])
+        df = df.rename(columns={date_col: "日期"})
+        
+        df = df.sort_values("日期").set_index("日期")
+        return df[["收盘"]]  # 返回收盘价
     except Exception as e:
-        print(f"{stock_code} 价格数据获取失败：{e}")
+        print(f"{stock_code} 数据获取失败：{e}")
         return pd.DataFrame()
 
-def get_financial_indicators(stock_code):
-    """优化指标匹配逻辑，兼容更多 PB/ROE 表述形式"""
-    try:
-        # 获取个股详情数据
-        df = ak.stock_a_indicator_lg(symbol=stock_code)
-       # df = ak.stock_individual_info_em(symbol=stock_code)
-       # print("DataFrame的列名：", df.columns)
 
-        if df.empty:
-            print(f"{stock_code} 无指标数据")
-            return None
-        
-        # 取最后一行数据（最新日期）
-        last_row = df.iloc[-1]  # -1 表示最后一行
-        
-        # 提取日期和PB
-        latest_date = last_row['trade_date']
-        latest_pb = last_row['pb']
-        
-        # 打印验证
-        print(f"{stock_code} 最新数据 - 日期：{latest_date}，PB：{latest_pb}")
+def get_index_data(start: str, end: str):
+    """获取沪深300指数数据"""
+    start_fmt = start.replace("-", "")
+    end_fmt = end.replace("-", "")
+    df = ak.index_zh_a_hist(symbol="000300", period="daily", start_date=start_fmt, end_date=end_fmt)
+    df["日期"] = pd.to_datetime(df["日期"])
+    df.set_index("日期", inplace=True)
+    return df
 
-        
-        # 提取指标名称列（第一列）和指标值列（第二列）
-        indicator_names = df.iloc[:, 0].str.lower()  # 转为小写，忽略大小写
-        indicator_values = df.iloc[:, 1]
-        
-        # 2. 匹配净资产收益率（支持“净资产收益率”“roe”等表述）
-        roe_mask = indicator_names.str.contains('净资产收益率|roe', na=False)
-        roe_rows = df[roe_mask]
-        if roe_rows.empty:
-            print(f"{stock_code} 未找到净资产收益率相关指标")
-            return None
-        
-        # 提取数值（处理百分号和特殊符号）
-        pb_str =latest_pb
-        roe_str = roe_rows.iloc[0, 1].replace('%', '').replace('--', '').strip()
-        
-        # 过滤无效值（如空字符串、非数字）
-        if not pb_str or not roe_str or not pb_str.replace('.', '').isdigit() or not roe_str.replace('.', '').isdigit():
+def score_stock_on_date(stock_df, index_df, date):
+    """计算某股票在某日的评分"""
+    weights = {"daily_change": 30, "5d_change": 30, "vs_market": 40}
+    score = 0
 
-            print(f"{stock_code} PB或ROE为无效值（PB: {pb_str}, ROE: {roe_str}）")
-            return None
-        
-        # 转换为浮点数
-        pb = float(pb_str)
-        roe = float(roe_str)
-        
-        return {'pb': pb, 'roe': roe}
-    
-    except Exception as e:
-        print(f"{stock_code} 财务数据获取失败：{e}")
+    if date not in stock_df.index:
         return None
 
+    # --- 单日涨跌幅 ---
+    today_close = stock_df.loc[date, "收盘"]
+    yesterday_close = stock_df.shift(1).loc[date, "收盘"]
+    daily_change = (today_close - yesterday_close) / yesterday_close * 100
 
-# --------------------------
-# 3. 核心筛选逻辑（调整顺序：先财务，后价格）
-# --------------------------
-def filter_stocks(stock_list):
-    """先筛选PB和ROE，再检查连续下跌的价格条件"""
-    selected_stocks = []
-    
-    for idx, row in stock_list.iterrows():
-        code = row['代码']
-        name = row['名称']
-        print(f"正在筛选：{code} {name}（{idx+1}/{len(stock_list)}）")
-        
-        # 第一步：先检查财务指标（PB和ROE）
-        financial_data = get_financial_indicators(code)
-        if not financial_data:
-            continue  # 财务数据缺失，直接跳过
-        
-        pb = financial_data['pb']
-        roe = financial_data['roe']
-        
-        # 财务指标不在范围内，直接跳过（不进入价格检查）
-        if not (pb_min <= pb <= pb_max and roe_min <= roe <= roe_max):
-            print(f"{code} 财务指标不达标（PB: {pb}, ROE: {roe}），跳过")
-            continue
-        
-        # 第二步：财务指标达标后，再检查价格是否连续两年下跌
-        price_df = get_price_history(code)
-        if price_df.empty or len(price_df) < 240:  # 至少需要240个交易日（约1年）
-            continue
-        
-        # 提取价格数据
-        latest_price = price_df.iloc[-1]['收盘']
-        one_year_ago_price = price_df[price_df.index <= pd.to_datetime(one_year_ago)].iloc[-1]['收盘']
-        two_year_ago_price = price_df[price_df.index <= pd.to_datetime(two_year_ago)].iloc[-1]['收盘']
-        
-        # 检查连续下跌条件
-        if not (latest_price < one_year_ago_price and one_year_ago_price < two_year_ago_price):
-            print(f"{code} 价格未连续下跌，跳过")
-            continue
-        
-        # 所有条件满足，加入结果
-        selected_stocks.append({
-            '代码': code,
-            '名称': name,
-            '最新价': latest_price,
-            '1年跌幅(%)': round((latest_price - one_year_ago_price)/one_year_ago_price * 100, 2),
-            '2年跌幅(%)': round((latest_price - two_year_ago_price)/two_year_ago_price * 100, 2),
-            '市净率(PB)': pb,
-            '净资产收益率(ROE, %)': roe
-        })
-        
-        # 控制请求频率
-        time.sleep(1)
-    
-    return pd.DataFrame(selected_stocks)
-
-
-# --------------------------
-# 4. 执行选股并保存结果
-# --------------------------
-if __name__ == "__main__":
-    print(f"开始选股（日期：{current_date}）...")
-    
-    stock_list = get_stock_list()
-    if stock_list.empty:
-        print("无股票数据，程序退出")
-        exit()
-    
-    result = filter_stocks(stock_list)
-    
-    if not result.empty:
-        save_path = f"选股结果_{current_date}.csv"
-        result.to_csv(save_path, index=False, encoding='utf-8-sig')
-        print(f"选股完成，共筛选出 {len(result)} 只股票，结果已保存至 {save_path}")
-        print(result[['代码', '名称', '市净率(PB)', '净资产收益率(ROE, %)', '2年跌幅(%)']])
+    if 2 <= daily_change <= 6:
+        score += weights["daily_change"]
+    elif 0 <= daily_change < 2 or 6 < daily_change <= 9:
+        score += weights["daily_change"] * 0.7
+    elif -2 <= daily_change < 0 or daily_change > 9:
+        score += weights["daily_change"] * 0.3
     else:
-        print("未筛选出符合条件的股票")
+        score += 0
+
+    # --- 连续5日涨跌幅 ---
+    idx = stock_df.index.get_loc(date)
+    if idx >= 4:
+        last5 = stock_df.iloc[idx-4:idx+1]
+        change_5d = (last5["收盘"][-1] - last5["收盘"][0]) / last5["收盘"][0] * 100
+        if 5 <= change_5d <= 15:
+            score += weights["5d_change"]
+        elif 0 <= change_5d < 5:
+            score += weights["5d_change"] * 0.7
+        elif change_5d > 15 or -5 > change_5d >= -10:
+            score += weights["5d_change"] * 0.3
+        elif change_5d < -10:
+            score += 0
+
+    # --- 今年 vs 大盘差值 ---
+    stock_ytd = (stock_df.loc[date, "收盘"] - stock_df.iloc[0]["收盘"]) / stock_df.iloc[0]["收盘"] * 100
+    index_ytd = (index_df.loc[date, "收盘"] - index_df.iloc[0]["收盘"]) / index_df.iloc[0]["收盘"] * 100
+    diff = stock_ytd - index_ytd
+
+    if diff > 20:
+        score += weights["vs_market"]
+    elif 0 <= diff <= 20:
+        score += weights["vs_market"] * (diff / 20)
+    elif -20 <= diff < 0:
+        score += weights["vs_market"] * 0.25
+    else:
+        score += 0
+
+    return round(score, 2)
+
+def backtest(stock_pool_file, start_date, end_date, output_file="scores_backtest.csv"):
+    stock_list = pd.read_csv(stock_pool_file)
+    index_df = get_index_data(start_date, end_date)
+
+    results = []
+    for _, row in stock_list.iterrows():
+        code, name = str(row["code"]), row["name"]
+        stock_df = get_stock_data(code, start_date, end_date)
+
+        for date in stock_df.index:
+            if date not in index_df.index:  # 过滤非交易日
+                continue
+            s = score_stock_on_date(stock_df, index_df, date)
+            if s is not None:
+                results.append({
+                    "date": date.strftime("%Y-%m-%d"),
+                    "code": code,
+                    "name": name,
+                    "score": s
+                })
+
+    pd.DataFrame(results).to_csv(output_file, index=False, encoding="utf-8-sig")
+    print(f"✅ 回测完成，结果保存至 {output_file}")
+
+if __name__ == "__main__":
+    backtest("/data/data/com.termux/files/home/AUTO-STOCK/stock_pool.csv",
+             "2025-07-01", "2025-08-18")
