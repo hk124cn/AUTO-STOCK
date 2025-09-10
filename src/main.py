@@ -11,34 +11,50 @@ def format_code(code: str) -> str:
         return "sz" + code
 
 def get_stock_data(stock_code, start_date, end_date):
-    """获取股票历史数据（修复日期列名问题）"""
+    """获取股票历史数据（兼容日期列名 & 修复日期格式+代码前缀）"""
     try:
+        # 日期格式转换（去掉横杠，改为YYYYMMDD）
+        start_fmt = start_date.replace("-", "")
+        end_fmt = end_date.replace("-", "")
+
         df = ak.stock_zh_a_hist(
-            symbol=stock_code,
+            symbol=stock_code,  # 这里要传带sh/sz的完整代码
             period="daily",
-            start_date=start_date,
-            end_date=end_date,
-            adjust="qfq"  # 前复权
+            start_date=start_fmt,
+            end_date=end_fmt,
+            adjust="qfq"
         )
-        # 关键：打印列名，确认日期列实际名称（比如可能是"date"而不是"日期"）
-        print(f"{stock_code} 的数据列名：{df.columns.tolist()}")
-        
-        # 根据实际列名修改（假设日期列是"date"，如果是其他名称替换即可）
-        date_col = "date"  # 这里替换为打印出的实际日期列名
-        if date_col not in df.columns:
-            # 保险起见，再尝试常见的列名（比如"trade_date"）
-            date_col = "trade_date" if "trade_date" in df.columns else df.columns[0]
-        
-        # 转换日期格式并统一列名为"日期"
+
+        # 打印列名（调试用）
+        print(f"{stock_code} 数据列名：{df.columns.tolist()}")
+
+        if df.empty:
+            print(f"⚠️ {stock_code} 无数据，检查代码/日期")
+            return pd.DataFrame()
+
+        # ---- 日期列兼容处理 ----
+        if "日期" in df.columns:
+            date_col = "日期"
+        elif "date" in df.columns:
+            date_col = "date"
+        elif "trade_date" in df.columns:
+            date_col = "trade_date"
+        else:
+            raise ValueError(f"{stock_code} 未找到日期列: {df.columns}")
+
         df[date_col] = pd.to_datetime(df[date_col])
         df = df.rename(columns={date_col: "日期"})
-        
+
+        # ---- 确保有收盘价 ----
+        if "收盘" not in df.columns:
+            raise ValueError(f"{stock_code} 缺少收盘列: {df.columns}")
+
         df = df.sort_values("日期").set_index("日期")
-        return df[["收盘"]]  # 返回收盘价
+        return df[["收盘"]]
+
     except Exception as e:
         print(f"{stock_code} 数据获取失败：{e}")
         return pd.DataFrame()
-
 
 def get_index_data(start: str, end: str):
     """获取沪深300指数数据"""
@@ -75,7 +91,8 @@ def score_stock_on_date(stock_df, index_df, date):
     idx = stock_df.index.get_loc(date)
     if idx >= 4:
         last5 = stock_df.iloc[idx-4:idx+1]
-        change_5d = (last5["收盘"][-1] - last5["收盘"][0]) / last5["收盘"][0] * 100
+        change_5d = (last5["收盘"].iloc[-1] - last5["收盘"].iloc[0]) / last5["收盘"].iloc[0] * 100
+
         if 5 <= change_5d <= 15:
             score += weights["5d_change"]
         elif 0 <= change_5d < 5:
@@ -102,29 +119,42 @@ def score_stock_on_date(stock_df, index_df, date):
     return round(score, 2)
 
 def backtest(stock_pool_file, start_date, end_date, output_file="scores_backtest.csv"):
-    stock_list = pd.read_csv(stock_pool_file)
+    stock_list = pd.read_csv(stock_pool_file, dtype={"code": str})
     index_df = get_index_data(start_date, end_date)
 
     results = []
     for _, row in stock_list.iterrows():
-        code, name = str(row["code"]), row["name"]
-        stock_df = get_stock_data(code, start_date, end_date)
+        raw_code = str(row["code"]).strip()
+        if len(raw_code) != 6:
+            print(f"❌ {raw_code} 不是6位代码，跳过")
+            continue
+
+        stock_df = get_stock_data(raw_code, start_date, end_date)
+        if stock_df.empty:
+            continue
 
         for date in stock_df.index:
-            if date not in index_df.index:  # 过滤非交易日
+            if date not in index_df.index:
                 continue
             s = score_stock_on_date(stock_df, index_df, date)
             if s is not None:
                 results.append({
                     "date": date.strftime("%Y-%m-%d"),
-                    "code": code,
-                    "name": name,
+                    "code": raw_code,
+                    "name": row["name"],
                     "score": s
                 })
 
-    pd.DataFrame(results).to_csv(output_file, index=False, encoding="utf-8-sig")
+    # 转 DataFrame 并保存
+    df_results = pd.DataFrame(results)
+    df_results.to_csv(output_file, index=False, encoding="utf-8-sig")
+
+    # 打印前几条结果，方便调试
+    print("前几条回测结果预览：")
+    print(df_results.head(5))
+
     print(f"✅ 回测完成，结果保存至 {output_file}")
 
 if __name__ == "__main__":
     backtest("/data/data/com.termux/files/home/AUTO-STOCK/stock_pool.csv",
-             "2025-07-01", "2025-08-18")
+             "2025-08-01", "2025-09-10")
