@@ -1,6 +1,7 @@
 import akshare as ak          # 用于获取股票和指数数据的第三方库
 import pandas as pd           # 数据处理核心库
 from datetime import timedelta # 处理日期加减运算
+from datetime import datetime
 
 def format_code(code: str) -> str:
     """补全交易所前缀（如sh/sz）"""
@@ -216,4 +217,4 @@ def backtest(stock_pool_file, start_date, end_date, output_file="scores_backtest
 if __name__ == "__main__":                                   # 当脚本被直接运行时才会执行以下代码块内的内容...
     backtest("stock_pool.csv",                              # 输入参数之一：包含待评估清单的文件路径...
              "2025-08-01",                                  # 测试时间段的起点设定...
-             "2025-09-10")                                  # 测试时间段的终点设定...
+             str(datetime.now().date()))
