@@ -1,12 +1,12 @@
 import importlib
 import pkgutil
-from factors import *
-from base_factor import BaseFactor
+from src.factors import *
+from src.core.base_factor import BaseFactor
 
 def load_factors():
     factors = []
-    for _, module_name, _ in pkgutil.iter_modules(['factors']):
-        module = importlib.import_module(f"factors.{module_name}")
+    for _, module_name, _ in pkgutil.iter_modules(['src/factors']):
+        module = importlib.import_module(f"src.factors.{module_name}")
         for attr in dir(module):
             obj = getattr(module, attr)
             if isinstance(obj, type) and issubclass(obj, BaseFactor) and obj is not BaseFactor:
