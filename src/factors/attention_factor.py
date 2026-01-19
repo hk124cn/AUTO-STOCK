@@ -1,6 +1,7 @@
 import akshare as ak
 import sys
 import math
+from src.core.base_factor import BaseFactor
 
 def get_stock_name(stock_code):
     """获取股票简称"""
@@ -89,3 +90,13 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+class attentionFactor(BaseFactor):
+    def __init__(self,code,name):
+        super().__init__(code,name)
+
+    def calculate(self):
+        return{
+            "name":"股民关注度",
+            "score":7
+        }      

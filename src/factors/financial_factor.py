@@ -1,5 +1,6 @@
 import akshare as ak
 import copy, sys
+from src.core.base_factor import BaseFactor
 
 def score_single_item(growth_rates, full_score):
     """
@@ -148,3 +149,13 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+class FinancialFactor(BaseFactor):
+    def __init__(self,code,name):
+        super().__init__(code,name)
+
+    def calculate(self):
+        return{
+            "name":"测试",
+            "score":6
+        }    
