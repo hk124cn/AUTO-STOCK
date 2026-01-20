@@ -1,5 +1,5 @@
-import akshare as ak
 import copy, sys
+import akshare as ak
 from src.core.base_factor import BaseFactor
 
 def score_single_item(growth_rates, full_score):
@@ -61,14 +61,15 @@ def calc_total_score(data):
 
     total = sum([s[0] for s in scores.values()])
     trend_adj = sum([s[1] for s in scores.values()])
-
+    result = max(min(total, 20), -10)
     print("\n=== 各项得分明细 ===")
     for k, v in scores.items():
         print(f"{k}: {v[0]}分（趋势调整: {v[1]}）")
 
     print(f"\n趋势加减总分: {trend_adj}")
-    print(f"总分（封顶20分，最低-10分）: {max(min(total, 20), -10)}")
-
+    print(f"总分（封顶20分，最低-10分）: {result}")
+    return result
+    
 def get_score(time):
     # 最近三个季度（倒序）
     if time == "本季度":
@@ -86,7 +87,7 @@ def get_score(time):
     df_for_print.columns = ["报告期","营收",
             "净利润",
             "扣非" ]
-    print(f"\n{gpcode}:{gpname}")
+    #print(f"\n{gpcode}:{gpname}")
     print(f"\n{time}的最近三个季度关键指标：")
     print(df_for_print.to_string(justify='left'))
     # 把增长率列转成 float（去掉 % 号和非数字）
@@ -109,7 +110,7 @@ def get_score(time):
     }
 
     # 调用评分逻辑
-    calc_total_score(data)
+    return calc_total_score(data)
 
 def get_stock_name(stock_code):
      # 调用东方财富接口获取个股信息，返回DataFrame格式
@@ -123,7 +124,7 @@ def get_stock_name(stock_code):
          return stockn
      
 def main():
-    global df, fields,gpcode,gpname
+    #global df, fields,gpcode,gpname
    # 拉取同花顺财务摘要数据
     print("输入股票代码:",end="")
     gpcode = input()
@@ -132,6 +133,10 @@ def main():
     except Exception as err:
        print('异常:股票代码不正确:\n' + str(err))
        sys.exit()
+    js_score(gpcode,2)
+    
+def js_score(gpcode,p_flg):
+    global df,fields
     df = ak.stock_financial_abstract_ths(symbol=gpcode, indicator="按单季度")
 
     fields = ["报告期", "净利润同比增长率", "扣非净利润同比增长率", "营业总收入同比增长率"]
@@ -143,8 +148,16 @@ def main():
         return
 
     caibao = ["本季度","上季度","上上季度"]
-    get_score(caibao[0])
-    get_score(caibao[1])
+    if p_flg == 1:
+        pf1 = get_score(caibao[0])
+        return pf1
+    elif p_flg == 2:
+        pf1 = get_score(caibao[0])
+        pf2 = get_score(caibao[1])
+    else:
+        pf1 = get_score(caibao[0])
+        pf2 = get_score(caibao[1])
+        pf3 = get_score(caibao[2])
     #get_score(caibao[2])
 
 if __name__ == "__main__":
@@ -155,7 +168,10 @@ class FinancialFactor(BaseFactor):
         super().__init__(code,name)
 
     def calculate(self):
+        score = js_score(self.code,1)
+       # sum_score = 20
         return{
-            "name":"测试",
-            "score":6
+            "name":"财报因子评分",
+            "score":score,
+            "sum_score":20
         }    
