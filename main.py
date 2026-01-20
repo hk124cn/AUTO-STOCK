@@ -22,17 +22,20 @@ def main():
     factor_classes = load_factors()
     total_score = 0
     total_weight = 0
+    s_score = 0
 
     for cls in factor_classes:
         factor = cls(code, name)
         result = factor.calculate()
         weight = getattr(factor, 'weight', 0)
+        sum_score = result.get('sum_score', 10)
         score = result.get('score', 0)
         total_score += score
         total_weight += weight
+        s_score += sum_score
         print(f"📊 {result['name']} => {score:.2f}")
 
-    print(f"\n总得分: {total_score:.2f} / {len(factor_classes) * 10:.0f}")
+    print(f"\n总得分: {total_score:.2f} / {s_score}")
     print("（每个因子已按权重比例自动加载）")
 
 
