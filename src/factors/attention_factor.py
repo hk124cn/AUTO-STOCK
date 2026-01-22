@@ -64,9 +64,11 @@ def main():
         sys.exit()
 
     print(f"\n=== {gpcode}: {gpname} ===")
+    js_code(gpcode)
 
+def js_score(code):
     # 获取股民关注度
-    df = ak.stock_comment_detail_scrd_focus_em(symbol=gpcode)
+    df = ak.stock_comment_detail_scrd_focus_em(symbol=code)
     if df.empty:
         print("❌ 未获取到关注度数据")
         sys.exit()
@@ -86,6 +88,7 @@ def main():
     print(f"波动(标准差): {std_focus:.2f}")
     print(f"市场趋势修正: {market_change:+.2f}%")
     print(f"最终得分: {score}/10")
+    return score
 
 
 if __name__ == "__main__":
@@ -96,7 +99,10 @@ class attentionFactor(BaseFactor):
         super().__init__(code,name)
 
     def calculate(self):
+        score = js_score(self.code)
+       # sum_score = 20
         return{
-            "name":"股民关注度",
-            "score":7
-        }      
+            "name":"股民关注度评分",
+            "score":score,
+            "sum_score":10
+        }         
