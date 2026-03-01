@@ -171,7 +171,7 @@ class FinancialFactor(BaseFactor):
         score = js_score(self.code,1)
        # sum_score = 20
         return{
-            "name":"财报因子评分",
+            "name":"财报",
             "score":score,
             "sum_score":20
         }    
