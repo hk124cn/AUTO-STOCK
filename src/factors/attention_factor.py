@@ -17,10 +17,10 @@ def get_market_change():
     try:
         #sh_stocks = ak.stock_sh_a_spot_em()
         sh_stocks = ak.stock_individual_spot_xq(symbol="SH000001")
-        print(sh_stocks)
+        #  print(sh_stocks)
         sh_index = sh_stocks[sh_stocks["item"] == "今年以来涨幅"]
         print(sh_index)
-        return 19.25
+        
         if sh_index.empty:
             print('空')
             return 0.0
@@ -102,7 +102,7 @@ class attentionFactor(BaseFactor):
         score = js_score(self.code)
        # sum_score = 20
         return{
-            "name":"股民关注度评分",
+            "name":"关注度",
             "score":score,
             "sum_score":10
         }         
