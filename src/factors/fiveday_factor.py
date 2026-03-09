@@ -1,18 +1,24 @@
 import akshare as ak
 import pandas as pd
 from src.core.base_factor import BaseFactor
-
+import src.utils
 
 def get_5day_return(code):
-    df = ak.stock_zh_a_hist(symbol=code, period="daily", adjust="qfq")
-
+    try:
+        s_code = src.utils.format_code(code)
+        start_day,end_day = src.utils.getdate()
+        df = ak.stock_zh_a_hist_tx(symbol=s_code, start_date=start_day, end_date=end_day, adjust="qfq")
+    except Exception as e:
+        print("5日行情接口异常",e)
+        return 0
     if len(df) < 6:
+        print("5日行情数量不足")
         return 0
 
     df = df.tail(6)
 
-    start_price = df.iloc[0]["收盘"]
-    end_price = df.iloc[-1]["收盘"]
+    start_price = df.iloc[0]["close"]
+    end_price = df.iloc[-1]["close"]
 
     return (end_price / start_price - 1) * 100
 

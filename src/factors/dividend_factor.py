@@ -1,15 +1,7 @@
 import akshare as ak
 import pandas as pd
 from src.core.base_factor import BaseFactor
-
-def format_code(code: str) -> str:
-    """补全交易所前缀（如sh/sz）"""
-    if code.startswith(("sh", "sz")):      # 如果已有前缀则直接返回
-        return code
-    elif code.startswith("6"):             # 上海市场代码以6开头
-        return "sh" + code                  # 添加sh前缀
-    else:                                   # 默认视为深圳市场
-        return "sz" + code                  # 添加sz前缀
+import src.utils
 
 # ===== 股息率主调度 =====
 def get_dividend_yield(stock_code: str, date: str = None):
@@ -24,7 +16,7 @@ def get_dividend_yield(stock_code: str, date: str = None):
 
 # ===== 实时模式 =====
 def _get_realtime_dividend_yield(stock_code):
-    s_code = format_code(stock_code)
+    s_code = src.utils.format_code(stock_code)
     df = ak.stock_individual_spot_xq(symbol=s_code)
    # print(df)
 
@@ -100,8 +92,8 @@ def _piecewise_linear_score(dy):
     ]
 
     # 超过上限
-    if dy >= 0.10:
-        return 10
+    if dy > 0.10:
+        return 6
 
     for i in range(len(points) - 1):
         x1, y1 = points[i]

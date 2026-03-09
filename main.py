@@ -2,13 +2,17 @@ import importlib
 import pkgutil
 import pandas as pd
 import sys
+import time
+import os
+from datetime import datetime
+
 
 from src.core.base_factor import BaseFactor
 
 
 def load_factors():
     factors = []
-    for _, module_name, _ in pkgutil.iter_modules(['src/factors']):
+    for _, module_name, _ in pkgutil.iter_modules(['/root/AUTO-STOCK/src/factors']):
         module = importlib.import_module(f"src.factors.{module_name}")
         for attr in dir(module):
             obj = getattr(module, attr)
@@ -24,6 +28,7 @@ def run_single(code):
 
     factor_classes = load_factors()
     total_score = 0
+    total_s = 0
     s_score = 0
     single_result = {}
     for cls in factor_classes:
@@ -39,13 +44,16 @@ def run_single(code):
         s_score += sum_score
 
         print(f"📊 {factor_name} => {factor_score:.2f}")
-
-    print(f"\n总得分: {total_score:.2f} / {s_score}")
-    single_result.update({'total_score':total_score})
+        total_s = round(total_score,2)
+    print(f"\n总得分: {total_s} / {s_score}")
+    single_result.update({'total_score':total_s})
     return single_result 
 
 
-def run_batch(csv_file):
+def run_batch(csv_file,in_fname):
+    if not os.path.exists(csv_file):
+        print("股票代码文件不存在")
+        return
     df = pd.read_csv(csv_file)
 
     if "code" not in df.columns:
@@ -55,6 +63,7 @@ def run_batch(csv_file):
     results = []
 
     for code,name in zip(df["code"],df["name"]):
+        time.sleep(0.5)
         code = str(code).zfill(6)   # 自动补齐6位
         print(f"\n====== 正在计算 {code} ======")
         single_result = run_single(str(code))
@@ -67,9 +76,12 @@ def run_batch(csv_file):
     cols = ["code", "name"] + [c for c in result_df.columns if c not in ["code", "name"]]
     result_df = result_df[cols]
     result_df = result_df.sort_values(by="total_score", ascending=False)
-
-    result_df.to_csv("batch_result.csv", index=False)
-    print("\n批量评分完成，结果已保存 batch_result.csv")
+    if in_fname =='':
+        filename = f"./src/result/batch_result_{datetime.today().strftime('%Y%m%d')}.csv"
+    else:
+        filename = f"./src/result/{in_fname}.csv"
+    result_df.to_csv(filename, index=False) 
+    print(f"批量评分完成，结果已保存在 {filename}")
 
 
 def main():
@@ -81,12 +93,12 @@ def main():
 
     if mode == "1":
         code = input("请输入股票代码: ").strip()
-        run_single(code)
+        run_single(str(code))
 
     elif mode == "2":
-        file = input("请输入股票池CSV路径: ").strip()
-        run_batch(file)
-
+        in_file = input("请输入股票池CSV路径:").strip()
+        in_fname = input("请输入结果名:").strip()
+        run_batch(in_file,in_fname)
     else:
         print("无效输入")
 
