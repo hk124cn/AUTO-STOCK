@@ -2,6 +2,7 @@ import akshare as ak
 import sys
 import math
 from src.core.base_factor import BaseFactor
+import src.utils
 
 def get_stock_name(stock_code):
     """获取股票简称"""
@@ -10,28 +11,6 @@ def get_stock_name(stock_code):
         raise Exception("错误股票代码")
     stock_name = stock_info[stock_info['item'] == '股票简称']['value'].values[0]
     return stock_name
-
-
-def get_market_change():
-    """获取上证指数年初至今涨跌幅"""
-    try:
-        #sh_stocks = ak.stock_sh_a_spot_em()
-        sh_stocks = ak.stock_individual_spot_xq(symbol="SH000001")
-        #  print(sh_stocks)
-        sh_index = sh_stocks[sh_stocks["item"] == "今年以来涨幅"]
-        print(sh_index)
-        
-        if sh_index.empty:
-            print('空')
-            return 0.0
-
-        #col_name = "今年以来涨幅"
-        change = float(sh_index["value"].values[0])
-        return round(change, 2)
-    except Exception as e:
-        print(f"⚠️ 无法获取上证指数数据: {e}")
-        return 0.0
-
 
 def calc_focus_score(df, market_change):
     """计算关注度得分"""
@@ -77,11 +56,11 @@ def js_score(code):
     print(df.tail(10))
 
     # 获取上证指数涨跌幅
-    market_change = get_market_change()
+    market_change = src.utils.get_market_change()
     print(f"\n📈 上证指数年初至今涨跌幅: {market_change}%")
 
     # 计算评分
-    score, mean_focus, std_focus = calc_focus_score(df.tail(20), market_change)
+    score, mean_focus, std_focus = calc_focus_score(df.tail(min(20, len(df))), market_change)
 
     print("\n📊 股民关注度评分结果:")
     print(f"平均关注度: {mean_focus:.2f}")

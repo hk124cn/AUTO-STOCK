@@ -12,20 +12,7 @@ def score_single_item(growth_rates, full_score):
 
     # === 基础增长分 ===
     rate = current
-    if rate >= 50:
-        base_score = full_score
-    elif rate >= 30:
-        base_score = full_score * 0.8
-    elif rate >= 20:
-        base_score = full_score * 0.7
-    elif rate >= 10:
-        base_score = full_score * 0.5
-    elif rate >= 0:
-        base_score = full_score * 0.3
-    elif rate >= -10:
-        base_score = full_score * 0.1
-    else:
-        base_score = 0
+    base_score = full_score * min(rate / 50, 1)
 
     # === 负增长额外扣分 ===
     if rate < 0:
@@ -168,7 +155,7 @@ class FinancialFactor(BaseFactor):
         super().__init__(code,name)
 
     def calculate(self):
-        score = js_score(self.code,1)
+        score = round(js_score(self.code,1),2)
        # sum_score = 20
         return{
             "name":"财报",

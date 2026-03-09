@@ -1,37 +1,21 @@
 import akshare as ak
 import pandas as pd
 import time
-from datetime import datetime
 from src.core.base_factor import BaseFactor
+import src.utils
 
-def getdate():
-    # 获取今年日期范围
-    today = datetime.today()
-    year_start = f"{today.year}0101"  # 20260101
-    today_str = today.strftime("%Y%m%d")  # 20260219
-    return year_start,today_str
-
+index_ret = None
 
 def get_stock_ytd_return(code):
-    start_day,end_day = getdate()
-    df = ak.stock_zh_a_hist(symbol=code, period="daily", start_date=start_day, end_date=end_day, adjust="qfq")
-
-    if df.empty or len(df) < 2:
-        print(f"⚠️ {code} 数据不足")
+    s_code = src.utils.format_code(code)
+    start_day,end_day = src.utils.getdate()
+    try:
+        df = ak.stock_zh_a_hist_tx(symbol=s_code, start_date=start_day, end_date=end_day, adjust="qfq")
+        #df = ak.stock_zh_a_hist(symbol=code, period="daily", start_date=start_day, end_date=end_day, adjust="qfq")
+    except Exception as e:
+        print("接口异常",e)
+        time.sleep(1)
         return 0
-    print(df.columns.tolist())
-    print(df.head(3))
-
-    start_price = df.iloc[0]["收盘"]
-    latest_price = df.iloc[-1]["收盘"]
-
-    return (latest_price / start_price - 1) * 100
-
-
-def get_index_ytd_return():
-    start_day,end_day = getdate()
-    df = ak.stock_zh_a_daily(symbol="sh000001", period="daily", start_date=start_day, end_date=end_day, adjust="qfq")
-
     if df.empty or len(df) < 2:
         print(f"⚠️ {code} 数据不足")
         return 0
@@ -41,16 +25,42 @@ def get_index_ytd_return():
 
     return (latest_price / start_price - 1) * 100
 
+"""
+def get_index_ytd_return():
+    global INDEX_YTD_CACHE
+
+    if INDEX_YTD_CACHE is not None:
+        return INDEX_YTD_CACHE
+
+    start_day,end_day = src.utils.getdate()
+    print(f"start:{start_day},end:{end_day}")
+    try:
+        df = ak.stock_zh_a_daily(symbol="sh000001", start_date=start_day, end_date=end_day, adjust="qfq")
+    except Exception as e:
+        print("接口异常2",e)
+        time.sleep(1)
+        return 0
+
+    if df.empty or len(df) < 2:
+        print(f"⚠️ sh000001 数据不足")
+        return 0
+
+    start_price = df.iloc[0]["close"]
+    latest_price = df.iloc[-1]["close"]
+ 
+    INDEX_YTD_CACHE = (latest_price / start_price - 1) * 100
+    return INDEX_YTD_CACHE
+"""
 
 class RelativeStrengthFactor(BaseFactor):
 
     weight = 10
 
     def calculate(self):
-
+        global index_ret
         stock_ret = get_stock_ytd_return(self.code)
-        index_ret = get_index_ytd_return()
-
+        if index_ret is None:
+            index_ret = src.utils.get_market_change()
         relative = stock_ret - index_ret
 
         # 打分逻辑（0~10分）
