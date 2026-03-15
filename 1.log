@@ -1,0 +1,216 @@
+.
+├── 1.log
+├── batch_result.csv
+├── cmd.txt
+├── config
+│   ├── config.py
+│   └── __pycache__
+│       └── config.cpython-312.pyc
+├── data
+│   ├── calendar
+│   │   └── trade_days.csv
+│   └── daily_market
+│       └── 20260313.csv
+├── main.py
+├── pool.py
+├── README.md
+├── requirements.txt
+├── scores_backtest.csv
+├── scripts
+├── src
+│   ├── backtester.py
+│   ├── config.py
+│   ├── core
+│   │   ├── backtest.py
+│   │   ├── base_factor.py
+│   │   ├── factor_manager.py
+│   │   ├── __init__.py
+│   │   ├── __pycache__
+│   │   │   ├── base_factor.cpython-312.pyc
+│   │   │   ├── base_factor.cpython-313.pyc
+│   │   │   ├── __init__.cpython-312.pyc
+│   │   │   └── __init__.cpython-313.pyc
+│   │   └── scoring_engine.py
+│   ├── datafactory
+│   │   ├── market_down.py
+│   │   └── trade_calendar.py
+│   ├── data_fetcher.py
+│   ├── factors
+│   │   ├── attention_factor.py
+│   │   ├── dividend_factor.py
+│   │   ├── dp_diff_factor.py
+│   │   ├── financial_factor.py
+│   │   ├── fiveday_factor.py
+│   │   ├── hy_diff_factor.py
+│   │   ├── __init__.py
+│   │   ├── news_factor.py
+│   │   ├── __pycache__
+│   │   │   ├── attention_factor.cpython-312.pyc
+│   │   │   ├── attention_factor.cpython-313.pyc
+│   │   │   ├── dailych_factor.cpython-312.pyc
+│   │   │   ├── dividend_factor.cpython-312.pyc
+│   │   │   ├── dividend_factor.cpython-313.pyc
+│   │   │   ├── dp_diff_factor.cpython-312.pyc
+│   │   │   ├── dp_diff_factor.cpython-313.pyc
+│   │   │   ├── financial_factor.cpython-312.pyc
+│   │   │   ├── financial_factor.cpython-313.pyc
+│   │   │   ├── fiveday_factor.cpython-312.pyc
+│   │   │   ├── fiveday_factor.cpython-313.pyc
+│   │   │   ├── hy_diff_factor.cpython-312.pyc
+│   │   │   ├── hy_diff_factor.cpython-313.pyc
+│   │   │   ├── __init__.cpython-312.pyc
+│   │   │   ├── __init__.cpython-313.pyc
+│   │   │   ├── news_factor.cpython-312.pyc
+│   │   │   ├── news_factor.cpython-313.pyc
+│   │   │   ├── zj_flow_factor.cpython-312.pyc
+│   │   │   └── zj_flow_factor.cpython-313.pyc
+│   │   ├── test
+│   │   │   ├── dailych_factor.py
+│   │   │   └── import time.ini
+│   │   └── zj_flow_factor.py
+│   ├── __init__.py
+│   ├── main.py
+│   ├── __pycache__
+│   │   ├── data_fetcher.cpython-312.pyc
+│   │   ├── __init__.cpython-311.pyc
+│   │   ├── __init__.cpython-312.pyc
+│   │   ├── __init__.cpython-313.pyc
+│   │   ├── __init__.cpython-38.pyc
+│   │   ├── main.cpython-311.pyc
+│   │   ├── main.cpython-312.pyc
+│   │   ├── main.cpython-38.pyc
+│   │   ├── selectors.cpython-312.pyc
+│   │   ├── test.cpython-312.pyc
+│   │   └── utils.cpython-313.pyc
+│   ├── result
+│   │   ├── batch_result_20260308.csv
+│   │   ├── batch_result_20260309.csv
+│   │   ├── batch_result_20260310.csv
+│   │   └── batch_result_20260311.csv
+│   ├── sel.py
+│   ├── test.py
+│   ├── tracker.py
+│   └── utils.py
+├── stock_full_pool.csv
+├── stock_pool.csv
+├── stock_test.csv
+├── venv
+│   ├── bin
+│   │   ├── activate
+│   │   ├── activate.csh
+│   │   ├── activate.fish
+│   │   ├── Activate.ps1
+│   │   ├── coverage
+│   │   ├── coverage3
+│   │   ├── coverage-3.13
+│   │   ├── curl-cffi
+│   │   ├── f2py
+│   │   ├── normalizer
+│   │   ├── numpy-config
+│   │   ├── pip
+│   │   ├── pip3
+│   │   ├── pip3.13
+│   │   ├── __pycache__
+│   │   │   └── runxlrd.cpython-313.pyc
+│   │   ├── pygmentize
+│   │   ├── py.test
+│   │   ├── pytest
+│   │   ├── python -> python3.13
+│   │   ├── python3 -> python3.13
+│   │   ├── python3.13 -> /usr/local/bin/python3.13
+│   │   ├── runxlrd.py
+│   │   ├── tabulate
+│   │   └── tqdm
+│   ├── include
+│   │   └── python3.13
+│   ├── lib
+│   │   └── python3.13
+│   │       └── site-packages
+│   │           ├── a1_coverage.pth
+│   │           ├── akracer-0.0.14.dist-info
+│   │           ├── akshare
+│   │           ├── akshare-1.18.34.dist-info
+│   │           ├── beautifulsoup4-4.14.3.dist-info
+│   │           ├── bs4
+│   │           ├── certifi
+│   │           ├── certifi-2026.2.25.dist-info
+│   │           ├── cffi
+│   │           ├── cffi-2.0.0.dist-info
+│   │           ├── _cffi_backend.cpython-313-x86_64-linux-gnu.so
+│   │           ├── charset_normalizer
+│   │           ├── charset_normalizer-3.4.4.dist-info
+│   │           ├── coverage
+│   │           ├── coverage-7.13.4.dist-info
+│   │           ├── curl_cffi
+│   │           ├── curl_cffi-0.14.0.dist-info
+│   │           ├── dateutil
+│   │           ├── decorator-5.2.1.dist-info
+│   │           ├── decorator.py
+│   │           ├── et_xmlfile
+│   │           ├── et_xmlfile-2.0.0.dist-info
+│   │           ├── html5lib
+│   │           ├── html5lib-1.1.dist-info
+│   │           ├── idna
+│   │           ├── idna-3.11.dist-info
+│   │           ├── iniconfig
+│   │           ├── iniconfig-2.3.0.dist-info
+│   │           ├── jsonpath-0.82.2.dist-info
+│   │           ├── jsonpath.py
+│   │           ├── lxml
+│   │           ├── lxml-6.0.2.dist-info
+│   │           ├── mock
+│   │           ├── mock-5.2.0.dist-info
+│   │           ├── numpy
+│   │           ├── numpy-2.4.2.dist-info
+│   │           ├── numpy.libs
+│   │           ├── openpyxl
+│   │           ├── openpyxl-3.1.5.dist-info
+│   │           ├── packaging
+│   │           ├── packaging-26.0.dist-info
+│   │           ├── pandas
+│   │           ├── pandas-3.0.1.dist-info
+│   │           ├── pip
+│   │           ├── pip-25.3.dist-info
+│   │           ├── pluggy
+│   │           ├── pluggy-1.6.0.dist-info
+│   │           ├── __pycache__
+│   │           ├── pycparser
+│   │           ├── pycparser-3.0.dist-info
+│   │           ├── pygments
+│   │           ├── pygments-2.19.2.dist-info
+│   │           ├── py_mini_racer
+│   │           ├── py_mini_racer-0.6.0.dist-info
+│   │           ├── py.py
+│   │           ├── _pytest
+│   │           ├── pytest
+│   │           ├── pytest-9.0.2.dist-info
+│   │           ├── pytest_cov
+│   │           ├── pytest_cov-7.0.0.dist-info
+│   │           ├── python_dateutil-2.9.0.post0.dist-info
+│   │           ├── requests
+│   │           ├── requests-2.32.5.dist-info
+│   │           ├── six-1.17.0.dist-info
+│   │           ├── six.py
+│   │           ├── soupsieve
+│   │           ├── soupsieve-2.8.3.dist-info
+│   │           ├── tabulate
+│   │           ├── tabulate-0.9.0.dist-info
+│   │           ├── tqdm
+│   │           ├── tqdm-4.67.3.dist-info
+│   │           ├── typing_extensions-4.15.0.dist-info
+│   │           ├── typing_extensions.py
+│   │           ├── urllib3
+│   │           ├── urllib3-2.6.3.dist-info
+│   │           ├── webencodings
+│   │           ├── webencodings-0.5.1.dist-info
+│   │           ├── xlrd
+│   │           └── xlrd-2.0.2.dist-info
+│   ├── lib64 -> lib
+│   └── pyvenv.cfg
+└── web
+    ├── app.py
+    └── components
+        ├── backtest_page.py
+        └── score_dashboard.py
+
+98 directories, 115 files
