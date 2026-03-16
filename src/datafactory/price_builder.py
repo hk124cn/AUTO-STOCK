@@ -1,7 +1,7 @@
 import pandas as pd
 import os
 
-MARKET_PATH = "data/market_daily"
+MARKET_PATH = "data/daily_market"
 PRICE_PATH = "data/price"
 
 os.makedirs(PRICE_PATH, exist_ok=True)
