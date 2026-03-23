@@ -1,135 +1,120 @@
-import akshare as ak
 import pandas as pd
+
 from src.core.base_factor import BaseFactor
-import src.utils
+from src.datafactory.data_manager import get_dividend, get_price, normalize_code
 
-# ===== 股息率主调度 =====
+
+def _safe_to_datetime(series):
+    return pd.to_datetime(series, errors="coerce")
+
+
+def _pick_announcement_col(df):
+    for col in ["公告日期", "实施公告日", "除权日", "股权登记日"]:
+        if col in df.columns:
+            return col
+    return None
+
+
+def _calc_dividend_yield_from_df(div_df, price, target_date=None):
+    if div_df is None or div_df.empty or price <= 0:
+        return 0.0
+
+    div_df = div_df.copy()
+    date_col = _pick_announcement_col(div_df)
+    if date_col is None or "派息" not in div_df.columns:
+        return 0.0
+
+    div_df[date_col] = _safe_to_datetime(div_df[date_col])
+    div_df["派息"] = pd.to_numeric(div_df["派息"], errors="coerce").fillna(0)
+
+    if target_date is None:
+        # 实时：优先最近一次有效分红
+        valid = div_df.dropna(subset=[date_col]).sort_values(date_col)
+        if valid.empty:
+            return 0.0
+        latest = valid.iloc[-1]
+        return max(0.0, float(latest["派息"]) / 10 / float(price))
+
+    target_dt = pd.to_datetime(target_date)
+    one_year_before = target_dt - pd.Timedelta(days=365)
+
+    valid = div_df[(div_df[date_col] <= target_dt) & (div_df[date_col] > one_year_before)]
+    if valid.empty:
+        return 0.0
+
+    total_dividend = (valid["派息"] / 10).sum()
+    return max(0.0, float(total_dividend) / float(price))
+
+
+def _get_latest_close(code, target_date=None):
+    code = normalize_code(code)
+    price_df = get_price(code)
+    if price_df is None or price_df.empty or "收盘" not in price_df.columns:
+        return None
+
+    df = price_df.copy()
+    if "日期" in df.columns:
+        df["日期"] = pd.to_datetime(df["日期"], errors="coerce")
+
+    if target_date is None:
+        return float(df["收盘"].iloc[-1])
+
+    target_dt = pd.to_datetime(target_date)
+    if "日期" not in df.columns:
+        return None
+
+    hist = df[df["日期"] <= target_dt]
+    if hist.empty:
+        return None
+    return float(hist.iloc[-1]["收盘"])
+
+
 def get_dividend_yield(stock_code: str, date: str = None):
+    code = normalize_code(stock_code)
+    price = _get_latest_close(code, date)
+    if price is None:
+        return 0.0
 
-    if date is None:
-        print("股息率实时评分模式")
-        return _get_realtime_dividend_yield(stock_code)
-    else:
-        print("股息率回测评分模式")
-        return _get_historical_dividend_yield(stock_code, date)
+    div_df = get_dividend(code, refresh=False)
+    ann_col = _pick_announcement_col(div_df) if div_df is not None else None
 
+    if date is None and div_df is not None and ann_col is not None:
+        temp = div_df.copy()
+        temp[ann_col] = _safe_to_datetime(temp[ann_col])
+        last_ann = temp[ann_col].max()
+        # 若公告日距离今天太久，尝试刷新一次
+        if pd.notna(last_ann) and (pd.Timestamp.today() - last_ann).days > 120:
+            div_df = get_dividend(code, refresh=True)
 
-# ===== 实时模式 =====
-def _get_realtime_dividend_yield(stock_code):
-    s_code = src.utils.format_code(stock_code)
-    df = ak.stock_individual_spot_xq(symbol=s_code)
-   # print(df)
+    if date is None and (div_df is None or div_df.empty):
+        div_df = get_dividend(code, refresh=True)
 
-    if df.empty:
-        print("股息率(TTM)未找到")
-        return None
-
-    # 注意根据实际字段调整
-    dividend_row = df[df['item'].str.contains('股息率', na=False)]  
-    if dividend_row['value'].iloc[0] == None:
-        dividend_value = 0
-    else:
-        dividend_value = float(dividend_row['value'].iloc[0])
-    print(f"股息率：{dividend_value}")
-    return float(dividend_value / 100)
+    return _calc_dividend_yield_from_df(div_df, price, target_date=date)
 
 
-# ===== 回测模式 =====
-def _get_historical_dividend_yield(stock_code, date):
-
-    target_date = pd.to_datetime(date)
-
-    # 1. 获取当日价格
-    price_df = ak.stock_zh_a_hist(
-        symbol=stock_code,
-        period="daily",
-        start_date=date,
-        end_date=date,
-        adjust=""
-    )
-
-    if price_df.empty:
-        return None
-
-    price = price_df["收盘"].iloc[0]
-
-    # 2. 获取分红数据
-    div_df = ak.stock_dividents_cninfo(symbol=stock_code)
-
-    if div_df.empty:
-        return 0
-
-    div_df["除权日"] = pd.to_datetime(div_df["除权日"])
-
-    one_year_before = target_date - pd.Timedelta(days=365)
-
-    recent_div = div_df[
-        (div_df["除权日"] <= target_date) &
-        (div_df["除权日"] > one_year_before)
-    ]
-
-    if recent_div.empty:
-        return 0
-
-    # 派息通常是每10股派X元
-    recent_div["每股分红"] = recent_div["派息"] / 10
-
-    total_dividend = recent_div["每股分红"].sum()
-
-    return total_dividend / price
-
-
-# ===== 分段线性评分 =====
 def _piecewise_linear_score(dy):
-
-    # 关键点
-    points = [
-        (0.00, 0),
-        (0.02, 4),
-        (0.05, 8),
-        (0.08, 10),
-        (0.10, 10)
-    ]
-
-    # 超过上限
+    points = [(0.00, 0), (0.02, 4), (0.05, 8), (0.08, 10), (0.10, 10)]
     if dy > 0.10:
         return 6
 
     for i in range(len(points) - 1):
         x1, y1 = points[i]
         x2, y2 = points[i + 1]
-
         if x1 <= dy <= x2:
-            # 线性插值公式
             score = y1 + (dy - x1) * (y2 - y1) / (x2 - x1)
             return round(score, 2)
-
     return 0
 
 
 def js_score(code: str, date: str = None):
-    """
-    获取评分
-    :param stock_code: 股票代码
-    :param date: None=实时,YYYY-MM-DD=历史
-    """
     dy = get_dividend_yield(code, date)
-    if dy is None:
-        print("股息率评分获取失败")
-        return 0
-
     return _piecewise_linear_score(dy)
 
 
 class dividendfactor(BaseFactor):
-    def __init__(self,code,name):
-        super().__init__(code,name)
+    def __init__(self, code, name=None):
+        super().__init__(code, name)
 
     def calculate(self):
         score = js_score(self.code)
-       # sum_score = 10
-        return{
-            "name":"股息率",
-            "score":score,
-            "sum_score":10
-        }         
+        return {"name": "股息率", "score": score, "sum_score": 10}

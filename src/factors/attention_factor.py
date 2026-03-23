@@ -1,87 +1,41 @@
-import akshare as ak
-import sys
 import math
+
 from src.core.base_factor import BaseFactor
+from src.datafactory.data_manager import get_attention
 import src.utils
 
-def get_stock_name(stock_code):
-    """获取股票简称"""
-    stock_info = ak.stock_individual_info_em(symbol=stock_code)
-    if stock_info.empty:
-        raise Exception("错误股票代码")
-    stock_name = stock_info[stock_info['item'] == '股票简称']['value'].values[0]
-    return stock_name
 
 def calc_focus_score(df, market_change):
-    """计算关注度得分"""
     mean_focus = df["用户关注指数"].mean()
     std_focus = df["用户关注指数"].std()
 
-    # --- 热度分（0~7分） ---
     base_score = (mean_focus - 80) / 2 - std_focus / 4 + market_change / 10
-    base_score = max(0, min(7, base_score))  # 限制在 0~7 分
+    base_score = max(0, min(7, base_score))
 
-    # --- 稳健分（0~3分） ---
     if mean_focus < 85 and std_focus < 3:
         stable_bonus = 2.5 - (std_focus / 3)
     else:
         stable_bonus = 0
 
     final_score = base_score + stable_bonus
-    final_score = round(min(10, max(1, final_score)), 1)  # 最低1分，最高10分
+    final_score = round(min(10, max(1, final_score)), 1)
+    return final_score
 
-    return final_score, mean_focus, std_focus
 
+def js_score(code, refresh=False):
+    df = get_attention(code, refresh=refresh)
+    if df is None or df.empty or "用户关注指数" not in df.columns:
+        return 0
 
-def main():
-    print("输入股票代码:", end="")
-    gpcode = input().strip()
-    try:
-        gpname = get_stock_name(gpcode)
-    except Exception as err:
-        print('异常: 股票代码不正确:\n' + str(err))
-        sys.exit()
-
-    print(f"\n=== {gpcode}: {gpname} ===")
-    js_code(gpcode)
-
-def js_score(code):
-    # 获取股民关注度
-    df = ak.stock_comment_detail_scrd_focus_em(symbol=code)
-    if df.empty:
-        print("❌ 未获取到关注度数据")
-        sys.exit()
-
-    print("最近关注度（部分数据）:")
-    print(df.tail(10))
-
-    # 获取上证指数涨跌幅
+    df["用户关注指数"] = df["用户关注指数"].astype(float)
     market_change = src.utils.get_market_change()
-    print(f"\n📈 上证指数年初至今涨跌幅: {market_change}%")
+    return calc_focus_score(df.tail(min(20, len(df))), market_change)
 
-    # 计算评分
-    score, mean_focus, std_focus = calc_focus_score(df.tail(min(20, len(df))), market_change)
-
-    print("\n📊 股民关注度评分结果:")
-    print(f"平均关注度: {mean_focus:.2f}")
-    print(f"波动(标准差): {std_focus:.2f}")
-    print(f"市场趋势修正: {market_change:+.2f}%")
-    print(f"最终得分: {score}/10")
-    return score
-
-
-if __name__ == "__main__":
-    main()
 
 class attentionFactor(BaseFactor):
-    def __init__(self,code,name):
-        super().__init__(code,name)
+    def __init__(self, code, name=None):
+        super().__init__(code, name)
 
     def calculate(self):
         score = js_score(self.code)
-       # sum_score = 20
-        return{
-            "name":"关注度",
-            "score":score,
-            "sum_score":10
-        }         
+        return {"name": "关注度", "score": score, "sum_score": 10}
