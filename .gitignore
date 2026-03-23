@@ -1,3 +1,11 @@
 venv/
 __pycache__/
 *.pyc
+
+# runtime/generated market data
+/data/daily_market/
+/data/price/
+/data/finance/
+/data/dividend/
+/data/attention/
+/data/news/

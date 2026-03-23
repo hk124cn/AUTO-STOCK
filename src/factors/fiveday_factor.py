@@ -1,37 +1,38 @@
-import akshare as ak
 import pandas as pd
+
 from src.core.base_factor import BaseFactor
-import src.utils
+from src.datafactory.data_manager import get_price, normalize_code
+
 
 def get_5day_return(code):
-    try:
-        s_code = src.utils.format_code(code)
-        start_day,end_day = src.utils.getdate()
-        df = ak.stock_zh_a_hist_tx(symbol=s_code, start_date=start_day, end_date=end_day, adjust="qfq")
-    except Exception as e:
-        print("5日行情接口异常",e)
+    code = normalize_code(code)
+    df = get_price(code)
+    if df is None or df.empty or "收盘" not in df.columns:
         return 0
+
+    df = df.copy()
+    if "日期" in df.columns:
+        df["日期"] = pd.to_datetime(df["日期"], errors="coerce")
+        df = df.sort_values("日期")
+
     if len(df) < 6:
-        print("5日行情数量不足")
         return 0
 
-    df = df.tail(6)
-
-    start_price = df.iloc[0]["close"]
-    end_price = df.iloc[-1]["close"]
+    last_6 = df.tail(6)
+    start_price = float(last_6.iloc[0]["收盘"])
+    end_price = float(last_6.iloc[-1]["收盘"])
+    if start_price <= 0:
+        return 0
 
     return (end_price / start_price - 1) * 100
 
 
 class FiveDayReturnFactor(BaseFactor):
-
     weight = 10
 
     def calculate(self):
-
         ret5 = get_5day_return(self.code)
 
-        # 趋势打分（0~10）
         if ret5 > 10:
             score = 10
         elif ret5 > 5:
@@ -43,10 +44,4 @@ class FiveDayReturnFactor(BaseFactor):
         else:
             score = 2
 
-        print(f"5日涨跌幅: {ret5:.2f}%")
-
-        return {
-            "name": "5日涨跌幅",
-            "score": score,
-            "sum_score": 10
-        }
+        return {"name": "5日涨跌幅", "score": score, "sum_score": 10}
