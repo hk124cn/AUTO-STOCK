@@ -1,5 +1,5 @@
 import pandas as pd
-
+from datetime import datetime
 from src.core.base_factor import BaseFactor
 from src.datafactory.data_manager import get_price, normalize_code
 import src.utils
@@ -8,27 +8,31 @@ index_ret = None
 
 
 def get_stock_ytd_return(code):
-    code = normalize_code(code)
-    df = get_price(code)
-    if df is None or df.empty or "收盘" not in df.columns:
-        return 0
-
-    df = df.copy()
-    if "日期" in df.columns:
-        df["日期"] = pd.to_datetime(df["日期"], errors="coerce")
-        df = df.sort_values("日期")
-
-    year_start = pd.Timestamp.today().replace(month=1, day=1)
-    ytd = df[df["日期"] >= year_start] if "日期" in df.columns else df
-    if ytd.empty or len(ytd) < 2:
-        return 0
-
-    start_price = float(ytd.iloc[0]["收盘"])
-    latest_price = float(ytd.iloc[-1]["收盘"])
-    if start_price <= 0:
-        return 0
-
-    return (latest_price / start_price - 1) * 100
+    """获取个股年初至今收益率"""
+    price_df = get_price(code)
+    
+    if price_df is None or price_df.empty:
+        return None
+    
+    # 确保日期列存在且为日期类型
+    if '日期' not in price_df.columns:
+        return None
+    
+    price_df['日期'] = pd.to_datetime(price_df['日期'])
+    price_df.set_index('日期', inplace=True)
+    
+    # 获取去年最后一个交易日的价格
+    current_year = datetime.now().year
+    last_year_end = f"{current_year-1}-12-31"
+    
+    last_year_data = price_df[price_df.index <= last_year_end]
+    if last_year_data.empty:
+        return None
+    
+    start_price = last_year_data.iloc[-1]['收盘']
+    end_price = price_df.iloc[-1]['收盘']
+    
+    return (end_price - start_price) / start_price * 100
 
 
 class RelativeStrengthFactor(BaseFactor):
@@ -37,6 +41,7 @@ class RelativeStrengthFactor(BaseFactor):
     def calculate(self):
         global index_ret
         stock_ret = get_stock_ytd_return(self.code)
+        print(f"今年本股票涨幅:{stock_ret}")
         if index_ret is None:
             index_ret = src.utils.get_market_change()
         relative = stock_ret - index_ret

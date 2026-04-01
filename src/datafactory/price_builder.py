@@ -2,7 +2,7 @@ import os
 
 import pandas as pd
 
-from src.datafactory.data_manager import PRICE_PATH, normalize_code
+from data_manager import PRICE_PATH, normalize_code
 
 MARKET_PATHS = ("data/daily_market", "data/market_daily")
 
@@ -25,13 +25,14 @@ def build_price():
     for filename in files:
         path = os.path.join(market_path, filename)
         df = pd.read_csv(path)
-
+        date1 = int(filename.split(".")[0])
+        print( f"date1:{date1}")
         for _, row in df.iterrows():
             code = normalize_code(row["代码"])
             stock_path = os.path.join(PRICE_PATH, f"{code}.csv")
 
             new_row = pd.DataFrame(
-                [{"日期": row["日期"], "收盘": row["最新价"], "成交额": row.get("成交额", None)}]
+                [{"日期": date1, "收盘": row["最新价"], "成交额": row.get("成交额", None)}]
             )
 
             if os.path.exists(stock_path):
@@ -42,3 +43,6 @@ def build_price():
                 old.to_csv(stock_path, index=False)
             else:
                 new_row.to_csv(stock_path, index=False)
+
+if __name__ == "__main__":
+    build_price()
