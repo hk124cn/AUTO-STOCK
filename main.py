@@ -12,7 +12,11 @@ from src.core.base_factor import BaseFactor
 
 def load_factors():
     factors = []
-    for _, module_name, _ in pkgutil.iter_modules(['/root/AUTO-STOCK/src/factors']):
+    # 获取项目根目录（main.py在根目录，只需一次dirname）
+    project_root = os.path.dirname(os.path.abspath(__file__))
+    factors_path = os.path.join(project_root, 'src', 'factors')
+    print(f"加载因子目录: {factors_path}")
+    for _, module_name, _ in pkgutil.iter_modules([factors_path]):
         module = importlib.import_module(f"src.factors.{module_name}")
         for attr in dir(module):
             obj = getattr(module, attr)
@@ -65,6 +69,10 @@ def run_batch(csv_file,in_fname):
     for code,name in zip(df["code"],df["name"]):
         time.sleep(0.5)
         code = str(code).zfill(6)   # 自动补齐6位
+        # 跳过无效代码
+        if not code.isdigit() or len(code) != 6:
+            print(f"跳过无效代码: {code}")
+            continue
         print(f"\n====== 正在计算 {code} ======")
         single_result = run_single(str(code))
         single_result.update({"code": code, "name": name})

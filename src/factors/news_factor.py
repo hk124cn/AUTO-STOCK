@@ -37,6 +37,8 @@ class NewsFactor(BaseFactor):
             score += 4
         elif len(recent_3) >= 3:
             score += 2
+        elif len(recent_3) >= 1:
+            score += 1
 
         if len(prev_3) > 0:
             acceleration = (len(recent_3) - len(prev_3)) / len(prev_3)
@@ -46,7 +48,8 @@ class NewsFactor(BaseFactor):
                 score += 2
 
         keywords = ["重组", "并购", "中标", "定增", "算力", "AI"]
-        keyword_hit = recent_3["新闻标题"].apply(lambda x: any(k in str(x) for k in keywords)).sum()
+        # 更安全的计数方式
+        keyword_hit = sum(1 for x in recent_3["新闻标题"] if any(k in str(x) for k in keywords))
 
         if keyword_hit >= 2:
             score += 3
