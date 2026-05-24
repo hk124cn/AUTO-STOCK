@@ -1,0 +1,265 @@
+<!--detail.wxml-->
+<view class="container">
+  <!-- 顶部导航 -->
+  <view class="header-row">
+    <view class="back-btn" bindtap="goBack">← 返回</view>
+    <view class="tab-switch">
+      <view class="tab-btn {{activeTab === 'score' ? 'active' : ''}}" bindtap="toggleTab" data-tab="score">评分说明</view>
+      <view class="tab-btn {{activeTab === 'feedback' ? 'active' : ''}}" bindtap="toggleTab" data-tab="feedback">建议反馈</view>
+    </view>
+  </view>
+
+  <!-- 关闭按钮 -->
+  <view wx:if="{{activeTab}}" class="close-tab-btn" bindtap="closeTab">← 返回股票详情</view>
+
+  <!-- 评分说明 -->
+  <view wx:if="{{activeTab === 'score'}}" class="info-card">
+    <view class="info-title">📊 评分规则说明</view>
+    <view class="info-section">
+      <view class="info-subtitle">评分指标与权重</view>
+      <view class="info-table">
+        <view class="info-row header">
+          <text>指标</text>
+          <text>满分</text>
+          <text>负增长封顶</text>
+        </view>
+        <view class="info-row">
+          <text>扣非净利润</text>
+          <text>10分</text>
+          <text>-5分</text>
+        </view>
+        <view class="info-row">
+          <text>归母净利润</text>
+          <text>5分</text>
+          <text>-2.5分</text>
+        </view>
+        <view class="info-row">
+          <text>营业收入</text>
+          <text>5分</text>
+          <text>-2.5分</text>
+        </view>
+      </view>
+      <view class="info-note">满分 20 分，最低 -10 分</view>
+    </view>
+
+    <view class="info-section">
+      <view class="info-subtitle">如何使用评分</view>
+      <view class="info-text">
+        <text>本评分是对抽离出来的单季度财报数据的分析，能有效避免整体财报增长，但最新季度已经出现下滑的问题。</text>
+      </view>
+      <view class="info-text" style="margin-top: 12px;">
+        <text style="font-weight:600">短期持股使用方法：</text>
+        <text>如果最新季度和上季度评分相差不大，接下来短期走势平稳的可能性较大；如果相差太大，则接下来短期走势出现大幅度上涨或者大幅度下跌的可能较大。</text>
+      </view>
+      <view class="info-text" style="margin-top: 12px;">
+        <text style="font-weight:600">长期持股使用方法：</text>
+        <text>主要看得分高低，结合基本面判断是否进入好转或者下滑通道。</text>
+      </view>
+    </view>
+  </view>
+
+  <!-- 建议反馈 -->
+  <view wx:if="{{activeTab === 'feedback'}}" class="info-card">
+    <view class="info-title">💡 功能建议反馈</view>
+    <view class="info-text">
+      <text>欢迎提出宝贵建议！</text>
+    </view>
+
+    <view class="feedback-form">
+      <textarea
+        class="feedback-textarea"
+        placeholder="请输入您的建议或问题..."
+        maxlength="500"
+        bindinput="onFeedbackInput"
+        value="{{feedbackContent}}"
+      ></textarea>
+      <view class="feedback-actions">
+        <button class="feedback-btn submit" bindtap="submitFeedback" disabled="{{!feedbackContent.trim() || submitting}}">
+          {{submitting ? '提交中...' : '提交建议'}}
+        </button>
+      </view>
+      <view wx:if="{{feedbackMessage}}" class="feedback-message {{feedbackMessage.type}}">
+        {{feedbackMessage.text}}
+      </view>
+    </view>
+
+    <view class="info-section">
+      <view class="info-subtitle">其他联系方式</view>
+      <view class="info-text">
+        <text>邮箱：qw_129@sina.com</text>
+        <text>网站：auto-claw.top</text>
+      </view>
+    </view>
+  </view>
+
+  <!-- 加载中 -->
+  <view wx:if="{{loading}}" class="loading">
+    <view class="spinner"></view>
+    <text>正在加载...</text>
+  </view>
+
+  <!-- 错误提示 -->
+  <view wx:if="{{error}}" class="error">{{error}}</view>
+
+  <!-- 股票详情内容 -->
+  <view wx:if="{{result && !loading && !activeTab}}" class="result">
+    <!-- 季度选择器 -->
+    <view class="quarter-tabs">
+      <view wx:for="{{['本季度', '上季度', '上上季度']}}" wx:key="*this" class="quarter-tab {{activeQuarter === item ? 'active' : ''}}" bindtap="switchQuarter" data-quarter="{{item}}">
+        {{item}}
+        <text wx:if="{{result.scores[item].report_date}}" class="quarter-date">{{result.scores[item].report_date}}</text>
+      </view>
+    </view>
+
+    <!-- 翻转容器 -->
+    <view class="flip-container {{showKline ? 'flipped' : ''}}">
+      <!-- 正面：评分卡片 -->
+      <view class="card score-card flip-front">
+        <view class="stock-info">
+          <view class="stock-code">{{result.code}}</view>
+          <view class="stock-name">{{result.name}}</view>
+        </view>
+
+        <view class="score-large">
+          <view class="score-number {{scoreClass}}">{{currentScore.total}}</view>
+          <view class="score-label">{{activeQuarter}}评分（满分20）</view>
+          <view class="updated-time" wx:if="{{klineDisclosureDate}}">财报发布于 {{klineDisclosureDate}}</view>
+        </view>
+      </view>
+
+      <!-- 背面：K线图表 -->
+      <view class="card kline-card flip-back">
+        <view class="kline-info">
+          <text class="kline-title">公告后股价走势</text>
+          <text class="kline-type">{{klineReportType}}</text>
+        </view>
+
+        <view wx:if="{{klineLoading}}" class="kline-loading">
+          <view class="spinner"></view>
+          <text>加载K线...</text>
+        </view>
+
+        <view wx:elif="{{klineError}}" class="kline-error">
+          {{klineError}}
+        </view>
+
+        <view wx:elif="{{showKline}}" class="kline-wrapper">
+          <view class="kline-date">{{klineDisclosureDate}} 公告</view>
+          <canvas canvas-id="klineCanvasDetail" class="kline-canvas" bindtouchstart="onKlineTouch" bindtouchmove="onKlineTouch" bindtouchend="onKlineTouchEnd"></canvas>
+          <view class="kline-tooltip" wx:if="{{klineTooltip}}" style="left:{{klineTooltip.x}}px;top:{{klineTooltip.y}}px">
+            <text class="tooltip-date">{{klineTooltip.date}}</text>
+            <text>开盘: {{klineTooltip.open}}</text>
+            <text>最高: {{klineTooltip.high}}</text>
+            <text>最低: {{klineTooltip.low}}</text>
+            <text>收盘: {{klineTooltip.close}}</text>
+            <text class="{{klineTooltip.changeColor}}">涨跌幅: {{klineTooltip.change}}%</text>
+          </view>
+          <view wx:if="{{klineStats}}" class="kline-stats">
+            <text>首日涨跌幅: <text class="{{klineStats.firstDayUp ? 'up' : 'down'}}">{{klineStats.firstDayChange}}%</text></text>
+            <text wx:if="{{klineStats.totalChange !== null}}">，{{klineStats.totalDays}}日后涨跌幅: <text class="{{klineStats.totalUp ? 'up' : 'down'}}">{{klineStats.totalChange}}%</text></text>
+          </view>
+        </view>
+      </view>
+    </view>
+
+    <!-- 切换按钮 -->
+    <button class="btn toggle-btn" bindtap="toggleView">
+      {{showKline ? '← 返回评分' : '查看公告后K线走势 →'}}
+    </button>
+
+    <view class="card">
+      <view class="section-title">分项得分</view>
+
+      <!-- 营业收入 -->
+      <view class="progress-item">
+        <view class="progress-label">
+          <text>营业收入</text>
+          <text>{{currentScore.yingshou}} / 5</text>
+        </view>
+        <view class="progress-bar">
+          <view class="progress-fill {{getScoreClass(currentScore.yingshou, 5)}}" style="width: {{currentScore.yingshou > 0 ? currentScore.yingshou / 5 * 100 : 0}}%"></view>
+        </view>
+      </view>
+
+      <!-- 归母净利润 -->
+      <view class="progress-item">
+        <view class="progress-label">
+          <text>归母净利润</text>
+          <text>{{currentScore.guimu}} / 5</text>
+        </view>
+        <view class="progress-bar">
+          <view class="progress-fill {{getScoreClass(currentScore.guimu, 5)}}" style="width: {{currentScore.guimu > 0 ? currentScore.guimu / 5 * 100 : 0}}%"></view>
+        </view>
+      </view>
+
+      <!-- 扣非净利润 -->
+      <view class="progress-item">
+        <view class="progress-label">
+          <text>扣非净利润</text>
+          <text>{{currentScore.koufei}} / 10</text>
+        </view>
+        <view class="progress-bar">
+          <view class="progress-fill {{getScoreClass(currentScore.koufei, 10)}}" style="width: {{currentScore.koufei > 0 ? currentScore.koufei / 10 * 100 : 0}}%"></view>
+        </view>
+      </view>
+    </view>
+
+    <!-- 财务数据卡片 -->
+    <view wx:if="{{currentScore.financeData}}" class="card">
+      <view class="section-title">单季度财务数据</view>
+      <view class="finance-grid">
+        <view class="finance-item">
+          <view class="finance-label">营业总收入</view>
+          <view class="finance-value">{{currentScore.financeData.totalRevenue}}</view>
+        </view>
+        <view class="finance-item">
+          <view class="finance-label">营业总收入同比</view>
+          <view class="finance-value {{getGrowthClass(currentScore.financeData.totalRevenueGrowth)}}">{{currentScore.financeData.totalRevenueGrowth}}</view>
+        </view>
+        <view class="finance-item">
+          <view class="finance-label">净利润</view>
+          <view class="finance-value">{{currentScore.financeData.netProfit}}</view>
+        </view>
+        <view class="finance-item">
+          <view class="finance-label">净利润同比</view>
+          <view class="finance-value {{getGrowthClass(currentScore.financeData.netProfitGrowth)}}">{{currentScore.financeData.netProfitGrowth}}</view>
+        </view>
+        <view class="finance-item">
+          <view class="finance-label">扣非净利润</view>
+          <view class="finance-value">{{currentScore.financeData.koufeiProfit}}</view>
+        </view>
+        <view class="finance-item">
+          <view class="finance-label">扣非净利润同比</view>
+          <view class="finance-value {{getGrowthClass(currentScore.financeData.koufeiProfitGrowth)}}">{{currentScore.financeData.koufeiProfitGrowth}}</view>
+        </view>
+      </view>
+    </view>
+
+    <!-- 趋势解读 -->
+    <view class="card">
+      <view class="section-title">趋势解读</view>
+      <view class="insight">
+        <text class="insight-text">{{result.quarter_trends[activeQuarter].trend_text}}</text>
+      </view>
+    </view>
+
+    <!-- 季度得分趋势 -->
+    <view class="card">
+      <view class="section-title">季度得分趋势</view>
+      <canvas canvas-id="trendCanvas" class="trend-canvas"></canvas>
+    </view>
+
+    <!-- 简要说明 -->
+    <view class="card">
+      <view class="section-title">简要说明</view>
+      <view wx:for="{{result.quarter_insights[activeQuarter]}}" wx:key="*this" class="insight">
+        <text class="insight-text">{{item}}</text>
+      </view>
+    </view>
+
+    <!-- 多因子系统入口 -->
+    <view class="footer-link" bindtap="goToMainSystem">
+      📊 进入多因子综合评分系统
+    </view>
+  </view>
+</view>

@@ -1,8 +1,10 @@
 import os
 import sys
+import json
 import logging
 from datetime import datetime
 from pathlib import Path
+import pandas as pd
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,8 +18,30 @@ from src.factors.financial_factor import js_score, get_finance, normalize_code
 
 app = FastAPI(title="财报评分API", version="1.0.0")
 
+# 启动事件
+@app.on_event("startup")
+async def startup_event():
+    load_stock_pool()
+
 # 静态文件目录
 STATIC_DIR = Path(__file__).parent.parent / "web"
+
+# 加载股票池到内存
+STOCK_POOL_FILE = Path(__file__).parent.parent / "stock_full_pool.csv"
+stock_pool = []
+
+def load_stock_pool():
+    """加载股票池到内存"""
+    global stock_pool
+    try:
+        if STOCK_POOL_FILE.exists():
+            df = pd.read_csv(STOCK_POOL_FILE)
+            stock_pool = df.to_dict('records')
+            print(f"股票池加载完成，共 {len(stock_pool)} 只")
+        else:
+            print(f"股票池文件不存在: {STOCK_POOL_FILE}")
+    except Exception as e:
+        print(f"加载股票池失败: {e}")
 
 # CORS配置
 app.add_middleware(
@@ -177,11 +201,11 @@ def analyze_trend(scores: dict) -> tuple:
     elif values[2] < values[1]:
         drop = values[1] - values[2]
         if drop >= 5:
-            text = "本季度急剧下滑，跌幅超5分"
+            text = f"本季度急剧下滑，跌幅{drop:.1f}分"
         elif drop >= 3:
-            text = "本季度大幅下滑，跌幅超3分"
+            text = f"本季度大幅下滑，跌幅{drop:.1f}分"
         else:
-            text = "本季度小幅下滑"
+            text = f"本季度小幅下滑，跌幅{drop:.1f}分"
         trend = "down"
     else:
         trend = "stable"
@@ -260,11 +284,11 @@ def analyze_single_quarter_trend(current: dict, prev: dict, prev_prev: dict) -> 
     elif values[2] < values[1]:
         drop = values[1] - values[2]
         if drop >= 5:
-            text = "本季度急剧下滑，跌幅超5分"
+            text = f"本季度急剧下滑，跌幅{drop:.1f}分"
         elif drop >= 3:
-            text = "本季度大幅下滑，跌幅超3分"
+            text = f"本季度大幅下滑，跌幅{drop:.1f}分"
         else:
-            text = "本季度小幅下滑"
+            text = f"本季度小幅下滑，跌幅{drop:.1f}分"
         trend = "down"
     else:
         trend = "stable"
@@ -313,42 +337,6 @@ def generate_all_quarter_insights(scores: dict) -> dict:
     quarter_insights['上上季度'] = generate_quarter_insights(scores.get('上上季度', {}))
 
     return quarter_insights
-
-
-def generate_quarter_insights(current: dict) -> list:
-    """分析单个季度的趋势，返回趋势描述"""
-    if not current or not prev:
-        return "数据不足，无法分析"
-
-    values = [prev_prev.get('total', 0) if prev_prev else 0,
-              prev.get('total', 0),
-              current.get('total', 0)]
-
-    # 分析趋势方向
-    if values[2] > values[1] > values[0]:
-        return "连续3个季度增长，增速加快"
-    elif values[2] > values[1] and values[1] >= values[0]:
-        return "近2个季度持续增长"
-    elif values[2] > values[1]:
-        drop = values[2] - values[1]
-        if drop >= 3:
-            return "本季度大幅回升"
-        else:
-            return "本季度小幅回升"
-    elif values[2] < values[1] < values[0]:
-        return "连续3个季度下滑，业绩承压"
-    elif values[2] < values[1] and values[1] <= values[0]:
-        return "近2个季度持续下滑"
-    elif values[2] < values[1]:
-        drop = values[1] - values[2]
-        if drop >= 5:
-            return "本季度急剧下滑，跌幅超5分"
-        elif drop >= 3:
-            return "本季度大幅下滑，跌幅超3分"
-        else:
-            return "本季度小幅下滑"
-    else:
-        return "评分保持平稳"
 
 
 def generate_quarter_insights(current: dict) -> list:
@@ -431,6 +419,40 @@ async def index_html():
     return {"error": "File not found"}
 
 
+@app.get("/api/v1/stock/search")
+async def search_stock(q: str, limit: int = 10):
+    """搜索股票，支持代码或名称模糊匹配"""
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"=== 搜索请求: q={repr(q)}, limit={limit}")
+    
+    if not q or len(q) < 2:
+        logger.info(f"  返回空: q 长度不足")
+        return []
+
+    q_lower = q.lower().strip()
+    results = []
+
+    for stock in stock_pool:
+        code = str(stock.get('code', ''))
+        name = str(stock.get('name', '')).lower().replace(" ","")
+
+        # 模糊匹配：代码包含 或 名称包含
+        if q_lower in code or q_lower in name:
+            result_code = str(stock.get('code', '')).zfill(6)
+            result_name = stock.get('name')
+            logger.info(f"  匹配到: code={repr(result_code)}, name={repr(result_name)}")
+            results.append({
+                'code': result_code,
+                'name': result_name
+            })
+            if len(results) >= limit:
+                break
+    
+    logger.info(f"  返回结果数: {len(results)}")
+    return results
+
+
 @app.get("/api/v1/financial/score/{code}")
 async def get_financial_score(code: str, request: Request, refresh: bool = False):
     """获取单只股票3个季度评分"""
@@ -475,13 +497,19 @@ async def get_financial_detail(code: str, request: Request, refresh: bool = Fals
         quarter_trends = analyze_quarter_trends(scores)
         quarter_insights = generate_all_quarter_insights(scores)
 
+        # 将 DataFrame 转为 dict，并处理 NaN 值
+        if finance_data is not None:
+            finance_dict = finance_data.fillna("").to_dict(orient="records")
+        else:
+            finance_dict = None
+
         result = {
             "code": code_normalized,
             "name": stock_name,
             "scores": scores,
             "quarter_trends": quarter_trends,
             "quarter_insights": quarter_insights,
-            "finance_data": finance_data.to_dict() if finance_data is not None else None,
+            "finance_data": finance_dict,
             "updated_at": datetime.now().strftime("%Y-%m-%d")
         }
 
@@ -496,3 +524,178 @@ async def get_financial_detail(code: str, request: Request, refresh: bool = Fals
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
+# ========== K线接口 ==========
+from src.datafactory.data_manager import get_kline_after_disclosure, normalize_code
+
+
+@app.get("/api/v1/financial/kline/{code}")
+async def get_financial_kline(code: str, quarter: str = "本季度", request: Request = None):
+    """获取财报发布后7个交易日的K线数据
+
+    参数:
+    - code: 股票代码
+    - quarter: 本季度/上季度/上上季度 (默认本季度)
+    """
+    client_ip = get_client_ip(request) if request else "unknown"
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    code_normalized = normalize_code(code)
+
+    try:
+        kline_data = get_kline_after_disclosure(code_normalized, quarter, days=7)
+
+        # 检查是否有错误
+        if kline_data.get("error"):
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "error": kline_data.get("error"),
+                    "code": code_normalized,
+                    "quarter": quarter
+                }
+            )
+
+        result = {
+            "code": code_normalized,
+            "quarter": quarter,
+            "report_period": kline_data.get("报告期"),
+            "disclosure_date": kline_data.get("公告日期"),
+            "report_type": kline_data.get("类型"),
+            "prev_close": kline_data.get("prev_close"),
+            "kline": kline_data.get("kline", []),
+            "updated_at": datetime.now().strftime("%Y-%m-%d")
+        }
+
+        logger.info(f"{timestamp} | {client_ip} | {code_normalized} | K线查询成功: {quarter}")
+        return result
+
+    except Exception as e:
+        logger.info(f"{timestamp} | {client_ip} | {code_normalized} | K线查询失败: {str(e)}")
+        return JSONResponse(status_code=500, content={"error": str(e), "code": code_normalized})
+
+
+# 建议反馈 API
+FEEDBACK_FILE = Path(__file__).parent.parent / "feedbacks.json"
+
+
+class Feedback(BaseModel):
+    content: str
+    code: str = ""
+    name: str = ""
+
+
+@app.post("/api/v1/feedback")
+async def submit_feedback(feedback: Feedback, request: Request):
+    """提交建议反馈"""
+    client_ip = get_client_ip(request)
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    try:
+        # 读取现有反馈
+        feedbacks = []
+        if FEEDBACK_FILE.exists():
+            with open(FEEDBACK_FILE, 'r', encoding='utf-8') as f:
+                feedbacks = json.load(f)
+
+        # 添加新反馈
+        new_feedback = {
+            "id": len(feedbacks) + 1,
+            "timestamp": timestamp,
+            "ip": client_ip,
+            "code": feedback.code,
+            "name": feedback.name,
+            "content": feedback.content,
+            "status": "new"
+        }
+        feedbacks.append(new_feedback)
+
+        # 保存到文件
+        with open(FEEDBACK_FILE, 'w', encoding='utf-8') as f:
+            json.dump(feedbacks, f, ensure_ascii=False, indent=2)
+
+        logger.info(f"{timestamp} | {client_ip} | 建议提交成功: {feedback.content[:50]}...")
+        return {"success": True, "message": "感谢您的反馈！"}
+
+    except Exception as e:
+        logger.info(f"{timestamp} | {client_ip} | 建议提交失败: {str(e)}")
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+# 股票搜索API
+@app.get("/api/v1/reports/search")
+async def search_reports(q: str):
+    """搜索股票（从今日报告中）"""
+    import pandas as pd
+    from datetime import datetime
+
+    today_str = datetime.now().strftime("%Y%m%d")
+    result_file = Path(__file__).parent.parent / "src" / "result" / f"batch_result_{today_str}.csv"
+
+    if not result_file.exists():
+        return []
+
+    try:
+        df = pd.read_csv(result_file)
+        q_lower = q.lower().strip()
+        # 模糊匹配
+        matches = df[df['code'].astype(str).str.contains(q, na=False) |
+                     df['name'].astype(str).str.lower().str.contains(q, na=False)]
+        results = matches.head(10).to_dict('records')
+        return results
+    except Exception as e:
+        return []
+
+
+@app.get("/api/v1/reports/today")
+async def get_today_reports():
+    """获取今日多因子评分报告数据（从batch_result_YYYYMMDD.csv读取）"""
+    from datetime import datetime
+    today_str = datetime.now().strftime("%Y%m%d")
+    result_file = Path(__file__).parent.parent / "src" / "result" / f"batch_result_{today_str}.csv"
+    date_str = today_str
+
+    # 如果今日文件不存在，查找最新可用文件
+    if not result_file.exists():
+        result_dir = Path(__file__).parent.parent / "src" / "result"
+        csv_files = sorted(result_dir.glob("batch_result_*.csv"), reverse=True)
+        if csv_files:
+            result_file = csv_files[0]
+            # 从文件名提取日期
+            date_str = result_file.stem.replace("batch_result_", "")
+        else:
+            return JSONResponse(status_code=404, content={"error": f"无可用报告数据"})
+
+    try:
+        df = pd.read_csv(result_file)
+        # 转为字典列表
+        records = df.to_dict('records')
+        return {
+            "date": date_str,
+            "count": len(records),
+            "data": records
+        }
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.get("/api/v1/reports/top")
+async def get_reports_top(n: int = 10):
+    """获取评分TOP N股票"""
+    from datetime import datetime
+    today_str = datetime.now().strftime("%Y%m%d")
+    result_file = Path(__file__).parent.parent / "src" / "result" / f"batch_result_{today_str}.csv"
+
+    if not result_file.exists():
+        return JSONResponse(status_code=404, content={"error": f"今日({today_str})报告数据不存在"})
+
+    try:
+        df = pd.read_csv(result_file)
+        df_sorted = df.sort_values('total_score', ascending=False).head(n)
+        return {
+            "date": today_str,
+            "count": n,
+            "data": df_sorted.to_dict('records')
+        }
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})

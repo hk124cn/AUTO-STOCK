@@ -1,0 +1,124 @@
+<!--index.wxml-->
+<view class="container">
+  <view class="header">
+    <text class="title">财报评分</text>
+  </view>
+
+  <view class="search-section">
+    <view class="search-box">
+      <input
+        class="search-input"
+        placeholder="输入代码或名称 (600519 或 茅台)"
+        placeholder-class="search-placeholder"
+        maxlength="20"
+        confirm-type="search"
+        bindinput="onSearchInput"
+        bindconfirm="search"
+        value="{{stockCode}}"
+      />
+      <view class="search-icon">🔍</view>
+    </view>
+
+    <!-- 搜索候选下拉框 -->
+    <view wx:if="{{showDropdown && searchResults.length > 0}}" class="search-dropdown">
+      <view
+        wx:for="{{searchResults}}"
+        wx:key="code"
+        class="search-item"
+        bindtap="selectStock"
+        data-code="{{item.code}}"
+        data-name="{{item.name}}"
+      >
+        <text class="search-item-code">{{item.code}}</text>
+        <text class="search-item-name">{{item.name}}</text>
+      </view>
+    </view>
+
+    <label class="refresh-checkbox">
+      <checkbox value="refresh" checked="{{refreshData}}" bindtap="toggleRefresh" />
+      <text>不是最新财报？选中这里再获取</text>
+    </label>
+
+    <button class="btn" bindtap="search" loading="{{loading}}">
+      {{loading ? '查询中...' : '查询评分'}}
+    </button>
+  </view>
+
+  <view wx:if="{{loading}}" class="loading">
+    <view class="spinner"></view>
+    <text>正在获取财报数据...</text>
+  </view>
+
+  <view wx:if="{{error}}" class="error">
+    {{error}}
+  </view>
+
+  <view wx:if="{{result && !loading}}" class="result">
+    <!-- 翻转容器 -->
+    <view class="flip-container {{showKline ? 'flipped' : ''}}">
+      <!-- 正面：评分卡片 -->
+      <view class="card score-card flip-front">
+        <view class="stock-info">
+          <view class="stock-code">{{result.code}}</view>
+          <view class="stock-name">{{result.name}}</view>
+        </view>
+
+        <view class="score-large">
+          <view class="score-number {{scoreClass}}">{{currentScoreTotal}}</view>
+          <view class="score-label">财报评分{{currentReportDate ? '(' + currentReportDate + ')' : ''}}</view>
+          <view class="score-max">满分 20</view>
+          <view class="trend {{trend}}">
+            <text wx:if="{{trend === 'up'}}" style="color:#FF3B30">↑</text>
+            <text wx:elif="{{trend === 'down'}}" style="color:#34C759">↓</text>
+            <text wx:else>→</text>
+            <text>{{trendText}}</text>
+          </view>
+        </view>
+      </view>
+
+      <!-- 背面：K线图表 -->
+      <view class="card kline-card flip-back">
+        <view class="kline-info">
+          <text class="kline-title">公告后股价走势</text>
+          <text class="kline-type">{{klineReportType}}</text>
+        </view>
+
+        <view wx:if="{{klineLoading}}" class="kline-loading">
+          <view class="spinner"></view>
+          <text>加载K线...</text>
+        </view>
+
+        <view wx:elif="{{klineError}}" class="kline-error">
+          {{klineError}}
+        </view>
+
+        <view wx:elif="{{showKline}}" class="kline-wrapper">
+          <view class="kline-date">{{klineDisclosureDate}} 公告</view>
+          <canvas canvas-id="klineCanvas" class="kline-canvas" bindtouchstart="onKlineTouch" bindtouchmove="onKlineTouch" bindtouchend="onKlineTouchEnd"></canvas>
+          <view class="kline-tooltip" wx:if="{{klineTooltip}}" style="left:{{klineTooltip.x}}px;top:{{klineTooltip.y}}px">
+            <text class="tooltip-date">{{klineTooltip.date}}</text>
+            <text>开盘: {{klineTooltip.open}}</text>
+            <text>最高: {{klineTooltip.high}}</text>
+            <text>最低: {{klineTooltip.low}}</text>
+            <text>收盘: {{klineTooltip.close}}</text>
+            <text class="{{klineTooltip.changeColor}}">涨跌幅: {{klineTooltip.change}}%</text>
+          </view>
+          <view wx:if="{{klineStats}}" class="kline-stats">
+            <text>首日涨跌幅: <text class="{{klineStats.firstDayUp ? 'up' : 'down'}}">{{klineStats.firstDayChange}}%</text></text>
+            <text wx:if="{{klineStats.totalChange !== null}}">，{{klineStats.totalDays}}日后涨跌幅: <text class="{{klineStats.totalUp ? 'up' : 'down'}}">{{klineStats.totalChange}}%</text></text>
+          </view>
+        </view>
+      </view>
+    </view>
+
+    <button class="btn toggle-btn" bindtap="toggleView">
+      {{showKline ? '← 返回评分' : '查看公告后K线走势 →'}}
+    </button>
+
+    <button class="btn" bindtap="goToDetail">查看详情 →</button>
+
+    <view class="footer-link" bindtap="goToMainSystem">
+      📊 进入多因子综合评分系统
+    </view>
+  </view>
+</view>

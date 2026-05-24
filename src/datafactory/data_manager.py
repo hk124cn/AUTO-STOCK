@@ -1,4 +1,5 @@
 import os
+import glob
 from datetime import datetime, timedelta
 import time
 
@@ -413,22 +414,100 @@ def get_fund_flow_5day(refresh=False):
         return local
 
 
-def get_stock_fund_flow(code):
-    """获取单只股票的5日资金流数据"""
+def get_latest_fund_flow_file():
+    """获取最新的资金流向文件路径"""
+    files = glob.glob(os.path.join(FUND_PATH, "fund_flow_5day_*.csv"))
+    if not files:
+        return None
+    # 按文件名排序，取最新
+    return sorted(files)[-1]
+
+
+def get_fund_flow_5day(refresh=False, date=None):
+    """获取同花顺5日资金流向数据
+
+    Args:
+        refresh: 是否强制刷新（从API下载）
+        date: 日期字符串 'YYYYMMDD'，不传则取最新文件
+
+    Returns:
+        DataFrame: 资金流向数据
+    """
+    if date:
+        # 回测模式：读取指定日期文件
+        file_path = os.path.join(FUND_PATH, f"fund_flow_5day_{date}.csv")
+        return _read_csv_if_exists(file_path)
+    else:
+        # 正常模式：优先读取最新本地文件
+        latest_file = get_latest_fund_flow_file()
+
+        # 检查本地文件是否需要更新
+        if not refresh and latest_file:
+            df = _read_csv_if_exists(latest_file)
+            if df is not None and not df.empty and 'update_date' in df.columns:
+                today = datetime.now().strftime('%Y-%m-%d')
+                if df['update_date'].iloc[0] == today:
+                    return df
+
+        # 从API下载并保存（带日期）
+        remote = _download_fund_flow_5day()
+        if remote is None:
+            return _read_csv_if_exists(latest_file)  # 返回旧数据
+
+        # 保存到文件（带日期）
+        today = datetime.now().strftime('%Y%m%d')
+        file_path = os.path.join(FUND_PATH, f"fund_flow_5day_{today}.csv")
+        remote.to_csv(file_path, index=False)
+        print(f"更新5日资金流数据，共 {len(remote)} 条")
+        return remote
+
+
+def _download_fund_flow_5day():
+    """从API下载资金流向数据"""
+    try:
+        remote = ak.stock_fund_flow_individual(symbol='5日排行')
+        if remote is None or remote.empty:
+            return None
+
+        # 添加更新日期
+        remote['update_date'] = datetime.now().strftime('%Y-%m-%d')
+
+        # 标准化股票代码
+        if '股票代码' in remote.columns:
+            remote['股票代码'] = remote['股票代码'].astype(str).str.strip().str.zfill(6)
+
+        return remote
+    except Exception as e:
+        print(f"获取5日资金流失败: {e}")
+        return None
+
+
+def get_stock_fund_flow(code, date=None):
+    """获取单只股票的5日资金流数据
+
+    Args:
+        code: 股票代码
+        date: 日期字符串 'YYYYMMDD'，不传则取最新
+
+    Returns:
+        Series: 资金流向数据
+    """
     code = normalize_code(code)
 
-    # 先确保有最新数据
-    df = get_fund_flow_5day()
+    # 获取数据（支持回测）
+    df = get_fund_flow_5day(date=date)
     if df is None or df.empty:
         return None
 
-    # 查找该股票（将股票代码转为字符串匹配）
-    df['股票代码'] = df['股票代码'].astype(str).str.zfill(6)
-    match = df[df['股票代码'] == code]
-    if match.empty:
-        return None
+    # 查找该股票
+    if '股票代码' in df.columns:
+        df['股票代码'] = df['股票代码'].astype(str).str.zfill(6)
+        match = df[df['股票代码'] == code]
+        if match.empty:
+            return None
+        return match.iloc[0]
 
-    return match.iloc[0]
+    return None
 
 
 # ========== 财报公告日期相关 ==========

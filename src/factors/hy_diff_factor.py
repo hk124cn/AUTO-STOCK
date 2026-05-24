@@ -8,126 +8,90 @@ import time
 # 导入数据管理器
 from src.datafactory.data_manager import INDUSTRY_PATH
 
-# 申万行业代码映射（行业名称 → 申万代码）
-# 注：已更新，添加汽车二级行业801880
-SW_CODE_MAP = {
-    '农林牧渔': '801010',
-    '化工': '801030',
-    '钢铁': '801040',
-    '有色金属': '801050',
-    '电子': '801080',
-    '纺织服装': '801110',
-    '轻工制造': '801120',
-    '家用电器': '801130',
-    '医药生物': '801150',
-    '食品饮料': '801160',
-    '公用事业': '801210',
-    '建筑装饰': '801230',
-    '房地产': '801250',
-    '商务服务': '801260',
-    '休闲服务': '801270',
-    '传媒': '801280',
-    '汽车': '801880',  # 申万汽车二级
-    # 近似映射（API不支持的行业映射到已有数据的近似行业）
-    '通信': '801080',      # 通信 → 电子
-    '电力设备': '801030',  # 电力设备 → 化工
-    '国防军工': '801030',  # 国防军工 → 化工
-    '机械设备': '801030',  # 机械设备 → 化工
-    '交通运输': '801030',  # 交通运输 → 化工
-    '非银金融': '801250',  # 非银金融 → 房地产
-    '银行': '801250',      # 银行 → 房地产
-    '综合': '801010',      # 综合 → 农林牧渔
-}
-
 # 内存缓存：行业成分股映射
 _industry_stocks_cache = None
+_industry_mapping_df_cache = None
 
 
-def _get_sw_code(industry_name):
-    """获取申万行业代码"""
-    return SW_CODE_MAP.get(industry_name)
+def _load_industry_mapping():
+    """加载行业映射到内存（只读一次）"""
+    global _industry_mapping_df_cache
 
+    if _industry_mapping_df_cache is not None:
+        return _industry_mapping_df_cache
 
-def _load_industry_stocks():
-    """加载行业成分股映射（内存缓存）"""
-    global _industry_stocks_cache
-    if _industry_stocks_cache is not None:
-        return _industry_stocks_cache
-
-    import os
     mapping_file = os.path.join(INDUSTRY_PATH, "stock_industry_mapping.csv")
-
     if not os.path.exists(mapping_file):
-        # 行业映射文件不存在，返回 None
         print(f"警告: 行业映射文件不存在: {mapping_file}")
-        print("请先运行 build_industry_mapping() 构建行业数据")
-        _industry_stocks_cache = {}
-        return _industry_stocks_cache
+        return None
 
     try:
-        df = pd.read_csv(mapping_file, dtype={'股票代码': str})
-        # 构建行业→股票列表的映射（去重，只保留第一个）
-        seen_codes = set()
-        _industry_stocks_cache = {}
-        for _, row in df.iterrows():
-            code = str(row.get('股票代码', '')).zfill(6)
-            industry = row.get('行业名称', '')
-            if code and industry and code not in seen_codes:
-                seen_codes.add(code)
-                if industry not in _industry_stocks_cache:
-                    _industry_stocks_cache[industry] = []
-                _industry_stocks_cache[industry].append(code)
-        print(f"已加载行业映射，共 {len(_industry_stocks_cache)} 个行业")
-        return _industry_stocks_cache
+        _industry_mapping_df_cache = pd.read_csv(mapping_file, dtype={'股票代码': str, '行业代码': str})
+        return _industry_mapping_df_cache
     except Exception as e:
         print(f"加载行业映射失败: {e}")
-        _industry_stocks_cache = {}
-        return _industry_stocks_cache
+        return None
 
 
 def get_stock_industry_from_cache(code):
-    """从缓存获取个股所属行业和代码（更快）"""
-    industry_stocks = _load_industry_stocks()
+    """从缓存获取个股所属行业和行业代码"""
+    df = _load_industry_mapping()
+    if df is None:
+        return None, ''
 
-    # 反向查找：股票代码 → 行业
     code = str(code).zfill(6)
-    for industry, stocks in industry_stocks.items():
-        if code in stocks:
-            # 从映射表中获取对应的行业代码
-            mapping_file = os.path.join(INDUSTRY_PATH, "stock_industry_mapping.csv")
-            try:
-                df = pd.read_csv(mapping_file, dtype={'股票代码': str})
-                match = df[df['股票代码'] == code]
-                if not match.empty:
-                    sw_code = match.iloc[0].get('行业代码', '')
-                    return industry, sw_code
-            except:
-                pass
-            return industry, ''
-    return None, ''
+    match = df[df['股票代码'] == code]
+
+    if match.empty:
+        return None, ''
+
+    return match.iloc[0]['行业名称'], match.iloc[0]['行业代码']
 
 
-def get_industry_change_by_code(sw_code, days=20):
-    """根据申万行业代码获取涨跌幅（从本地缓存读取）"""
+def get_industry_change_by_code(sw_code, date=None, days=20):
+    """根据申万行业代码获取涨跌幅
+
+    Args:
+        sw_code: 申万行业代码
+        date: 日期字符串 'YYYY-MM-DD'，不传则取最新交易日
+        days: 涨跌幅周期
+
+    Returns:
+        DataFrame: 包含 change_pct 等字段
+    """
     if not sw_code:
         return None
 
-    # 读取缓存文件
     file_path = os.path.join(INDUSTRY_PATH, f"change_{sw_code}_{days}d.csv")
     if not os.path.exists(file_path):
         return None
 
     try:
         df = pd.read_csv(file_path)
-        return df
+
+        if df.empty:
+            return None
+
+        if date:
+            # 回测模式：精确匹配日期
+            match = df[df['date'] == date]
+            if not match.empty:
+                return match.iloc[0]
+
+            # 没有精确匹配，取最近的前一天
+            df['date'] = pd.to_datetime(df['date'])
+            df = df[df['date'] <= pd.to_datetime(date)]
+            if df.empty:
+                return None
+            df = df.sort_values('date', ascending=False)
+            return df.iloc[0]
+        else:
+            # 正常模式：取最新日期
+            df = df.sort_values('date', ascending=False)
+            return df.iloc[0]
+
     except Exception:
         return None
-
-
-def get_industry_change_by_name(industry_name, days=20):
-    """根据行业名称获取申万行业涨跌幅（已废弃，请使用 get_industry_change_by_code）"""
-    # 兼容旧代码，但不再使用
-    return None
 
 
 def get_stock_period_return(code, days=20):
@@ -167,55 +131,46 @@ def get_stock_period_return(code, days=20):
 # 评分配置 - 各维度满分及权重
 SCORE_CONFIG = {
     'relative': {
-        'weight': 0.50,  # 相对强弱权重 50%
-        'full_score': 10,  # 满分10分
+        'weight': 0.60,  # 相对强弱权重 60%
+        'full_score': 10,
     },
     'momentum': {
         'weight': 0.20,  # 行业动量权重 20%
-        'full_score': 10,  # 满分10分
+        'full_score': 10,
     },
     'absolute': {
         'weight': 0.20,  # 绝对强度权重 20%
-        'full_score': 10,  # 满分10分
-    },
-    'stability': {
-        'weight': 0.10,  # 稳定性权重 10%
-        'full_score': 10,  # 满分10分
+        'full_score': 10,
     },
 }
 
 
-def calculate_industry_score(stock_pct, industry_pct, stock_period_returns):
+def calculate_industry_score(stock_pct, industry_pct):
     """多维度行业差异评分
 
     返回: (总分, 各维度得分详情)
     """
-    # 1. 相对强弱 (50%)
+    # 1. 相对强弱 (60%)
     relative = stock_pct - industry_pct
-    relative_score = _score_relative(relative, 10)  # 10分制
+    relative_score = _score_relative(relative, 10)
 
-    # 2. 行业动量 (20%) - 行业本身涨跌情况
+    # 2. 行业动量 (20%)
     momentum_score = _score_momentum(industry_pct, 10)
 
-    # 3. 绝对强度 (20%) - 个股本身的涨幅
+    # 3. 绝对强度 (20%)
     absolute_score = _score_absolute(stock_pct, 10)
-
-    # 4. 稳定性 (10%) - 相对强弱波动
-    stability_score = _score_stability(stock_period_returns, industry_pct, 10)
 
     # 计算加权总分
     total = (
         relative_score * SCORE_CONFIG['relative']['weight'] +
         momentum_score * SCORE_CONFIG['momentum']['weight'] +
-        absolute_score * SCORE_CONFIG['absolute']['weight'] +
-        stability_score * SCORE_CONFIG['stability']['weight']
+        absolute_score * SCORE_CONFIG['absolute']['weight']
     )
 
     details = {
         'relative': {'value': relative, 'score': round(relative_score, 2)},
         'momentum': {'value': industry_pct, 'score': round(momentum_score, 2)},
         'absolute': {'value': stock_pct, 'score': round(absolute_score, 2)},
-        'stability': {'value': 0, 'score': round(stability_score, 2)},
     }
 
     return round(total, 1), details
@@ -281,43 +236,17 @@ def _score_absolute(stock_pct, full_score):
         return 0
 
 
-def _score_stability(stock_period_returns, industry_pct, full_score):
-    """稳定性评分 - 简化为中等分数"""
-    # 暂给5分（满分10分的中等分数）
-    return full_score * 0.5
-
-
-# 全局变量存储每日涨跌幅数据用于稳定性计算
-_industry_daily_change = {}
-
-
-def get_industry_change_cached(industry_name, days=20, use_cache=True):
-    """获取行业涨跌幅（带缓存）"""
-    cache_key = f"{industry_name}_{days}"
-
-    if use_cache and cache_key in _industry_change_cache:
-        return _industry_change_cache[cache_key]
-
-    result = get_industry_change(industry_name, days=days)
-
-    if result is not None and not result.empty:
-        _industry_change_cache[cache_key] = result
-
-    return result
-
-
 class IndustryDiffFactor(BaseFactor):
     """行业差异因子：比较个股与所属行业的相对表现
 
     多维度评分：
-    1. 相对强弱 (50%) - 个股 vs 行业
+    1. 相对强弱 (60%) - 个股 vs 行业
     2. 行业动量 (20%) - 行业本身涨跌
     3. 绝对强度 (20%) - 个股本身涨幅
-    4. 稳定性 (10%) - 相对强弱波动
 
-    防封策略：
-    - 使用内存缓存的行业映射
-    - 行业涨跌幅数据本地缓存
+    数据来源：
+    - 行业映射：data/industry/stock_industry_mapping.csv
+    - 行业涨跌幅：data/industry/change_{sw_code}_20d.csv
     """
 
     def calculate(self):
@@ -331,12 +260,12 @@ class IndustryDiffFactor(BaseFactor):
         # 2. 根据行业代码获取行业近期涨幅
         industry_change = get_industry_change_by_code(sw_code, days=20)
 
-        if industry_change is None or industry_change.empty:
+        if industry_change is None:
             print(f"无法获取行业 {industry_name}({sw_code}) 的涨跌幅")
             return {"name": "行业相对强弱", "score": 0, "sum_score": 10,
                     "meta": {"industry": industry_name, "sw_code": sw_code, "error": "行业涨跌幅数据不存在"}}
 
-        industry_pct = industry_change.iloc[0]['change_pct']
+        industry_pct = industry_change['change_pct']
 
         # 3. 获取个股近期涨幅
         stock_pct = get_stock_period_return(self.code, days=20)
@@ -348,11 +277,7 @@ class IndustryDiffFactor(BaseFactor):
 
         # 4. 计算多维度评分
         relative = stock_pct - industry_pct
-
-        # 简化的稳定性计算（暂用固定值）
-        stock_period_returns = [stock_pct]  # 简化处理
-
-        score, details = calculate_industry_score(stock_pct, industry_pct, stock_period_returns)
+        score, details = calculate_industry_score(stock_pct, industry_pct)
 
         print(f"{self.code} 个股:{stock_pct:.2f}% 行业:{industry_name}:{industry_pct:.2f}% 相对:{relative:.2f}% → 得分:{score}")
 

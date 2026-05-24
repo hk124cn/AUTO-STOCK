@@ -1,0 +1,96 @@
+<view class="container">
+  <!-- Header -->
+  <view class="header">
+    <text class="title">每日多因子评分分析报告</text>
+    <text class="subtitle">{{date}} | 覆盖 {{totalCount}} 只股票</text>
+  </view>
+
+  <!-- Search -->
+  <view class="search-box">
+    <input class="search-input" placeholder="输入代码或名称搜索" value="{{searchKey}}" bindinput="onSearchInput" bindconfirm="onSearch" />
+    <button class="search-btn" bindtap="onSearch">搜索</button>
+  </view>
+
+  <!-- Search Results -->
+  <view wx:if="{{searchResults.length > 0}}" class="search-results">
+    <view wx:for="{{searchResults}}" wx:key="code" class="search-item" bindtap="viewStock" data-code="{{item.code}}">
+      <text class="item-code">{{item.code}}</text>
+      <text class="item-name">{{item.name}}</text>
+      <text class="item-score {{item.scoreClass}}">{{item.score}}</text>
+    </view>
+  </view>
+
+  <!-- Loading -->
+  <view wx:if="{{loading}}" class="loading">
+    <text>加载中...</text>
+  </view>
+
+  <!-- Error -->
+  <view wx:if="{{error}}" class="error">
+    <text>{{error}}</text>
+  </view>
+
+  <!-- Content -->
+  <view wx:if="{{!loading && !error && hasData}}">
+    <!-- 大盘概览 -->
+    <view class="section">
+      <view class="stitle">一、大盘概览</view>
+      <view class="stats-grid">
+        <view class="stat-card">
+          <text class="stat-value">{{maxScore}}</text>
+          <text class="stat-label">最高分</text>
+        </view>
+        <view class="stat-card">
+          <text class="stat-value">{{minScore}}</text>
+          <text class="stat-label">最低分</text>
+        </view>
+        <view class="stat-card">
+          <text class="stat-value">{{avgScore}}</text>
+          <text class="stat-label">平均分</text>
+        </view>
+        <view class="stat-card">
+          <text class="stat-value">{{medianScore}}</text>
+          <text class="stat-label">中位数</text>
+        </view>
+      </view>
+    </view>
+
+    <!-- 评分分布 -->
+    <view class="section">
+      <view class="section-title">评分分布</view>
+      <view wx:for="{{distribution}}" wx:key="name" class="dist-bar">
+        <text class="dist-label">{{item.name}}</text>
+        <view class="dist-bar-bg">
+          <view class="dist-bar-fill" style="width: {{item.pct}}%"></view>
+        </view>
+        <text class="dist-value">{{item.count}} ({{item.pct}}%)</text>
+      </view>
+    </view>
+
+    <!-- TOP 榜单 -->
+    <view class="section">
+      <view class="stitle">二、TOP 榜单</view>
+      <view class="rank-list">
+        <view wx:for="{{topList}}" wx:key="code" class="rank-item" bindtap="viewStock" data-code="{{item.code}}">
+          <text class="rank-num">{{item.rank}}</text>
+          <text class="rank-code">{{item.code}}</text>
+          <text class="rank-name">{{item.name}}</text>
+          <text class="rank-score {{item.scoreClass}}">{{item.score}}</text>
+        </view>
+      </view>
+    </view>
+
+    <!-- 各因子单项冠军 -->
+    <view class="section">
+      <view class="stitle">各因子单项冠军</view>
+      <view class="champion-list">
+        <view wx:for="{{champions}}" wx:key="factor" class="champion-item">
+          <text class="champion-factor">{{item.factor}}</text>
+          <text class="champion-code">{{item.code}}</text>
+          <text class="champion-name">{{item.name}}</text>
+          <text class="champion-score">{{item.score}}</text>
+        </view>
+      </view>
+    </view>
+  </view>
+</view>

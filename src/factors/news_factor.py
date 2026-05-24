@@ -22,34 +22,47 @@ class NewsFactor(BaseFactor):
 
     def filter_before_date(self, df):
         target_dt = pd.to_datetime(self.target_date)
-        return df[df["发布时间"] <= target_dt]
+        # 使用当天23:59:59确保当天新闻不被过滤
+        end_of_day = target_dt.replace(hour=23, minute=59, second=59)
+        return df[df["发布时间"] <= end_of_day]
 
     def calculate_score(self, df):
-        target_dt = pd.to_datetime(self.target_date)
+        # 使用当天23:59:59确保当天新闻不被过滤
+        target_dt = pd.to_datetime(self.target_date).replace(hour=23, minute=59, second=59)
         recent_3 = df[df["发布时间"] >= target_dt - timedelta(days=3)]
         prev_3 = df[
             (df["发布时间"] < target_dt - timedelta(days=3))
             & (df["发布时间"] >= target_dt - timedelta(days=6))
         ]
 
+        # 情绪过滤：只过滤包含负面关键词的新闻，保留正面和中性新闻
+        negative_keywords = ["下跌", "净流出", "出逃", "跌超", "减持", "流出超", "撤离", "爆雷", "风险"]
+
+        def is_negative(title):
+            return any(kw in str(title) for kw in negative_keywords)
+
+        # 对recent_3过滤：只保留非负面新闻
+        recent_3_filtered = recent_3[~recent_3["新闻标题"].apply(is_negative)] if len(recent_3) > 0 and "新闻标题" in recent_3.columns else pd.DataFrame()
+        # 对prev_3也过滤（用于加速比计算）
+        prev_3_filtered = prev_3[~prev_3["新闻标题"].apply(is_negative)] if len(prev_3) > 0 and "新闻标题" in prev_3.columns else pd.DataFrame()
+
         score = 0
-        if len(recent_3) >= 5:
+        if len(recent_3_filtered) >= 5:
             score += 4
-        elif len(recent_3) >= 3:
+        elif len(recent_3_filtered) >= 3:
             score += 2
-        elif len(recent_3) >= 1:
+        elif len(recent_3_filtered) >= 1:
             score += 1
 
-        if len(prev_3) > 0:
-            acceleration = (len(recent_3) - len(prev_3)) / len(prev_3)
+        if len(prev_3_filtered) > 0:
+            acceleration = (len(recent_3_filtered) - len(prev_3_filtered)) / len(prev_3_filtered)
             if acceleration > 1:
                 score += 3
             elif acceleration > 0.5:
                 score += 2
 
         keywords = ["重组", "并购", "中标", "定增", "算力", "AI"]
-        # 更安全的计数方式
-        keyword_hit = sum(1 for x in recent_3["新闻标题"] if any(k in str(x) for k in keywords))
+        keyword_hit = sum(1 for x in recent_3_filtered["新闻标题"] if any(k in str(x) for k in keywords)) if len(recent_3_filtered) > 0 and "新闻标题" in recent_3_filtered.columns else 0
 
         if keyword_hit >= 2:
             score += 3
