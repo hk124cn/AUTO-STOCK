@@ -28,56 +28,69 @@ def get_last_trading_day(date_str):
     return None
 
 # ==================== 配置 ====================
-RESULT_DIR = "/home/admin/AUTO-STOCK/src/result"
+RESULT_DIR = "/home/admin/AUTO-STOCK/result/daily_score"
 SELF_STOCK_FILE = "/home/admin/AUTO-STOCK/stock_self_selected.csv"
 FOCUS_STOCK_FILE = "/home/admin/AUTO-STOCK/stock_focus.csv"
 
 # ==================== 配置 ====================
-RESULT_DIR = "/home/admin/AUTO-STOCK/src/result"
+RESULT_DIR = "/home/admin/AUTO-STOCK/result/daily_score"
 SELF_STOCK_FILE = "/home/admin/AUTO-STOCK/stock_self_selected.csv"
 FOCUS_STOCK_FILE = "/home/admin/AUTO-STOCK/stock_focus.csv"
 
-# ==================== 妙想API获取涨跌幅 ====================
+# ==================== 从本地数据获取涨跌幅 ====================
+PRICE_DIR = "/home/admin/AUTO-STOCK/data/price"
+
 def get_stock_changepct(codes):
-    """通过妙想API批量获取股票涨跌幅"""
+    """从本地CSV文件获取股票今日涨跌幅"""
     results = {}
     if not codes:
         return results
-    
-    try:
-        api_key = os.environ.get('MX_APIKEY', 'mkt_65LysqK_vB294d8JkHEvwazCMpoMSfdWJFC0Ia1mYuo')
-        url = "https://mkapi2.dfcfs.com/finskillshub/api/claw/query"
-        headers = {"Content-Type": "application/json", "apikey": api_key}
-        
-        # 分批查询（每次5个）
-        for i in range(0, len(codes), 5):
-            batch = codes[i:i+5]
-            query = " ".join([f"{c}今日涨跌幅" for c in batch])
-            payload = {"toolQuery": query}
-            resp = requests.post(url, json=payload, headers=headers, timeout=10)
-            if resp.status_code == 200:
-                result = resp.json()
-                # 解析返回的涨跌幅数据
-                try:
-                    dto_list = result.get('data', {}).get('data', {}).get('searchDataResultDTO', {}).get('dataTableDTOList', [])
-                    for dto in dto_list:
-                        table = dto.get('table', {})
-                        for key, val in table.items():
-                            if key == 'headName':
-                                continue
-                            # key 可能是 "易成新能(300080.SZ)"
-                            code_match = re.search(r'(\d{6})', key)
-                            if code_match and val:
-                                try:
-                                    pct = float(val[0].replace('%', '').replace('+', ''))
-                                    results[code_match.group(1)] = pct
-                                except:
-                                    pass
-                except Exception as e:
-                    print(f"解析失败: {e}")
-    except Exception as e:
-        print(f"获取涨跌幅失败: {e}")
-    
+
+    for code in codes:
+        try:
+            filepath = os.path.join(PRICE_DIR, f"{code}.csv")
+            if not os.path.exists(filepath):
+                continue
+            with open(filepath, 'r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                rows = list(reader)
+                if len(rows) >= 2:
+                    today_close = float(rows[-1]['收盘'])
+                    yest_close = float(rows[-2]['收盘'])
+                    if yest_close > 0:
+                        pct = (today_close - yest_close) / yest_close * 100
+                        results[code] = round(pct, 2)
+        except Exception as e:
+            pass
+
+    return results
+
+def get_stock_price_info(codes):
+    """从本地CSV文件获取股票收盘价和涨跌幅"""
+    results = {}
+    if not codes:
+        return results
+
+    for code in codes:
+        try:
+            filepath = os.path.join(PRICE_DIR, f"{code}.csv")
+            if not os.path.exists(filepath):
+                continue
+            with open(filepath, 'r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                rows = list(reader)
+                if len(rows) >= 1:
+                    today_close = float(rows[-1]['收盘'])
+                    today_date = rows[-1]['日期']
+                    pct = None
+                    if len(rows) >= 2:
+                        yest_close = float(rows[-2]['收盘'])
+                        if yest_close > 0:
+                            pct = round((today_close - yest_close) / yest_close * 100, 2)
+                    results[code] = {'close': today_close, 'date': today_date, 'change_pct': pct}
+        except Exception as e:
+            pass
+
     return results
 
 # ==================== 读取数据 ====================
@@ -241,17 +254,17 @@ def analyze_focus_stock(code, name, today_row, history, yesterday_data=None):
             change_str = ""
         lines.append(f"    | {f} | {val_str} | {change_str} | {tag} |")
 
-    # 历史走势
-    trend = get_score_trend(code, history)
+    # 历史走势（最近10次）
+    trend = get_score_trend(code, history)[:10]
     if len(trend) >= 2:
-        lines.append(f"    📈 历史评分走势:")
+        lines.append(f"    📈 最近{len(trend)}次评分走势:")
         for t in trend:
             lines.append(f"      {t['date']}: {t['score']:.2f}")
         first = trend[-1]["score"]
         last = trend[0]["score"]
         change = last - first
         arrow = "📈 上升" if change > 0 else "📉 下降" if change < 0 else "➡️ 持平"
-        lines.append(f"      总变化: {arrow} ({change:+.2f})")
+        lines.append(f"      变化: {arrow} ({change:+.2f})")
     else:
         lines.append(f"    📈 历史数据不足，仅 {len(trend)} 天")
 
@@ -740,15 +753,36 @@ def generate_html_report(today_date, history):
     focus_avg_scores = [float(focus_today[c]['total_score']) for c in focus_today if c in focus_stocks]
     focus_avg_score = sum(focus_avg_scores)/len(focus_avg_scores) if focus_avg_scores else 0
     focus_ranks = []
-    
+
+    # 获取关注股票的价格信息
+    focus_codes = list(focus_stocks.keys())
+    price_info = get_stock_price_info(focus_codes)
+
     for code, name in focus_stocks.items():
         row = focus_today.get(code)
         h.append('<div class="fc">')
         h.append(f'<div class="fh"><span class="fcode">{code}</span><span class="fname">{name}</span></div>')
-        
+
         if row:
             sc = float(row['total_score'])
             h.append(f'<div class="fscore">{sc:.2f}</div>')
+
+            # 显示收盘价和涨跌幅
+            pi = price_info.get(code)
+            if pi:
+                close_str = f"{pi['close']:.2f}"
+                pct = pi.get('change_pct')
+                if pct is not None:
+                    if pct > 0:
+                        pct_str = f'<span style="color:#22c55e;font-weight:600">+{pct:.2f}%</span>'
+                    elif pct < 0:
+                        pct_str = f'<span style="color:#ef4444;font-weight:600">{pct:.2f}%</span>'
+                    else:
+                        pct_str = f'<span style="color:#999">0.00%</span>'
+                else:
+                    pct_str = '<span style="color:#999">--</span>'
+                h.append(f'<div style="text-align:center;font-size:13px;color:#666;margin:4px 0">收盘: {close_str} | 涨跌幅: {pct_str}</div>')
+
             # 获取昨日数据
             yesterday_map = {r["code"]: r for r in yesterday_data} if yesterday_data else {}
             yesterday_row = yesterday_map.get(code)
@@ -783,14 +817,14 @@ def generate_html_report(today_date, history):
                 h.append(f'<tr><td>{f}</td><td>{vs}</td><td>{change_str}</td><td>{tag}</td></tr>')
             h.append('</tbody></table>')
             
-            # 历史走势
-            trend = get_score_trend(code, history)
+            # 历史走势（最近10次）
+            trend = get_score_trend(code, history)[:10]
             if trend and len(trend) >= 2:
-                h.append('<div style="margin-top:8px;font-size:12px"><strong>📈 历史评分走势:</strong><br>')
+                h.append(f'<div style="margin-top:8px;font-size:12px"><strong>📈 最近{len(trend)}次评分走势:</strong><br>')
                 for t in trend:
                     h.append(f'  {t["date"]}: {t["score"]:.2f}<br>')
                 change = trend[0]["score"] - trend[-1]["score"]
-                h.append(f'  总变化: {"📈 上升" if change > 0 else ("📉 下降" if change < 0 else "➡️ 持平")} ({change:+.2f})</div>')
+                h.append(f'  变化: {"📈 上升" if change > 0 else ("📉 下降" if change < 0 else "➡️ 持平")} ({change:+.2f})</div>')
             elif trend:
                 h.append('<div style="font-size:12px;margin-top:8px">📈 历史数据不足，仅 1 天</div>')
             

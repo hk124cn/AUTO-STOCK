@@ -3,9 +3,12 @@
 ## 1. 系统架构
 
 ```
-用户访问: http://auto-claw.top:3000 (Vite开发服务器)
-         └─► api/main.py (FastAPI 8000端口)
-              └─► AUTO-STOCK 系统 (src/)
+用户访问: https://auto-claw.top/
+         ├─→ /              财报评分（Vue App 静态文件）
+         ├─→ /reports/      每日多因子评分（静态HTML）
+         ├─→ /yujing/       个股评分预警图（Vue App 静态文件）
+         ├─→ /api/          FastAPI 后端（8000端口）
+         └─→ /api/generate_report  报告生成（8766端口）
 ```
 
 **目录结构:**
@@ -13,143 +16,136 @@
 AUTO-STOCK/
 ├── main.py              # 命令行批量评分入口
 ├── api/main.py          # FastAPI HTTP服务 (端口8000)
-├── web/                 # Vue前端 (3000端口)
-├── src/
+├── web/
+│   ├── financial-report/   # → /  财报评分 Vue App
+│   ├── stock-alert/        # → /yujing/  个股预警 Vue App
+│   └── maintenance.html    # 维护页面
+├── reports/             # → /reports/  每日报告
+├── result/              # 评分结果
+│   ├── daily_score/     # batch_result_*.csv
+│   └── score_price_history.csv  # 评分-价格历史大表
+├── data/                # 本地数据缓存
+│   ├── price/           # 个股价格数据（Nginx 直接读取）
+│   ├── finance/         # 财务数据缓存
+│   ├── dividend/        # 分红数据缓存
+│   ├── daily_market/    # 每日市场快照
+│   ├── attention/       # 关注度数据
+│   ├── fund/            # 资金流向数据
+│   └── industry/        # 行业映射+涨跌幅
+├── src/                 # 评分系统源码
 │   ├── core/            # 核心模块
-│   │   ├── base_factor.py       # 因子基类
-│   │   ├── factor_manager.py   # 因子动态加载
-│   │   └── scoring_engine.py   # 评分引擎
-│   ├── factors/         # 因子实现
-│   │   ├── financial_factor.py # 财报因子 (满分20分)
-│   │   ├── dividend_factor.py  # 股息率因子 (满分10分)
-│   │   ├── attention_factor.py # 关注度因子
-│   │   ├── zj_flow_factor.py   # 资金流因子
-│   │   └── ...
+│   ├── factors/         # 因子实现（9个因子）
 │   ├── datafactory/     # 数据层
-│   │   ├── data_manager.py     # 数据统一访问
-│   │   ├── market_down.py      # 市场行情下载
-│   │   ├── price_builder.py    # 价格数据清洗
-│   │   ├── finance_manager.py  # 财务管理
-│   │   └── trade_calendar.py   # 交易日历
-│   └── result/          # 评分结果输出
-└── data/                # 本地数据缓存
-    ├── price/           # 个股价格数据
-    ├── finance/         # 财务数据缓存
-    ├── dividend/        # 分红数据缓存
-    ├── daily_market/    # 每日市场快照
-    └── attention/       # 关注度数据
+│   └── analyzer/        # 分析器（kline_analyzer）
+└── scripts/
+    ├── evening_pipeline.sh      # 每日晚间流水线
+    ├── daily_report.py          # 每日报告生成
+    ├── start_financial_score.sh # 启动服务脚本
+    └── report_api.py            # 报告生成API
 ```
 
 ---
 
-## 2. 因子评分逻辑
+## 2. Nginx 配置
 
-### 2.1 财报因子 (Financial Factor) - 满分20分
+配置文件：`/etc/nginx/conf.d/auto-claw.top.conf`
 
-**数据来源:** AKShare `ak.stock_financial_abstract_ths()`
+```nginx
+# 财报评分
+location / {
+    root /home/admin/AUTO-STOCK/web/financial-report/dist;
+    try_files $uri $uri/ /index.html;
+}
 
-**评分维度:**
-| 指标 | 满分 | 评分逻辑 |
-|------|------|----------|
-| 扣非净利润同比增长率 | 10分 | 基础分: 40%增长=满分; 趋势分: 连续增长/下降/V型反转 |
-| 归母净利润同比增长率 | 5分 | 同上 |
-| 营业总收入同比增长率 | 5分 | 同上 |
+# 每日报告
+location = /reports { return 301 /reports/; }
+location /reports/ {
+    alias /home/admin/AUTO-STOCK/reports/;
+    try_files $uri $uri/ /reports/index.html;
+}
 
-**趋势评分规则:**
-- 连续增长: +15%
-- 连续下降: -15%  
-- V型反转 (负→正): +10%
-- 倒V反转 (正→负): -10%
-- 平均变化>5%: +10%
-- 平均变化<-5%: -10%
+# 个股预警 - 评分数据（自动更新）
+location = /yujing/data/score_price_history.csv {
+    alias /home/admin/AUTO-STOCK/result/score_price_history.csv;
+}
+
+# 个股预警 - 价格数据（自动更新）
+location /yujing/data/price/ {
+    alias /home/admin/AUTO-STOCK/data/price/;
+}
+
+# 个股预警 - 静态文件
+location /yujing/ {
+    alias /home/admin/AUTO-STOCK/web/stock-alert/dist/;
+    try_files $uri $uri/ /yujing/index.html;
+}
+
+# API 代理
+location /api/generate_report {
+    proxy_pass http://127.0.0.1:8766;
+}
+location /api/ {
+    proxy_pass http://127.0.0.1:8000;
+}
+```
 
 ---
 
-### 2.2 股息率因子 (Dividend Factor) - 满分10分
+## 3. 每日定时任务
 
-**数据来源:** AKShare `ak.stock_history_dividend_detail()`
-
-**评分规则 (分段线性):**
-| 股息率 | 得分 |
-|--------|------|
-| 0% | 0分 |
-| 2% | 4分 |
-| 5% | 8分 |
-| 8%-10% | 10分 |
-| >10% | 6分 (过高可能不稳定) |
-
----
-
-### 2.3 其他因子
-| 因子 | 满分 | 说明 |
+| 时间 | 任务 | 脚本 |
 |------|------|------|
-| attention_factor.py | - | 关注度因子 |
-| zj_flow_factor.py | - | 资金流因子 |
-| news_factor.py | - | 新闻因子 |
-| fiveday_factor.py | - | 五日走势因子 |
-| dp_diff_factor.py | - | 大盘差值因子 |
-| hy_diff_factor.py | - | 行业差值因子 |
+| 17:00 | 拉取市场数据 | `scripts/daily_download.sh` |
+| 18:00 | 未来收益标签 | `scripts/daily_future_return.sh` |
+| 19:00 | 晚间流水线 | `scripts/evening_pipeline.sh`（评分→分析→报告）|
 
----
-
-## 3. 数据来源与更新
-
-### 3.1 数据源 (AKShare)
-
-| 数据类型 | API | 本地路径 |
-|----------|-----|----------|
-| 个股价格 | `ak.stock_zh_a_hist()` | `data/price/{code}.csv` |
-| 市场行情 | `ak.stock_zh_a_spot()` / `ak.stock_zh_a_spot_em()` | `data/daily_market/{date}.csv` |
-| 财务数据 | `ak.stock_financial_abstract_ths()` | `data/finance/{code}.csv` |
-| 分红数据 | `ak.stock_history_dividend_detail()` | `data/dividend/{code}.csv` |
-
-### 3.2 更新频率
-
-**定时任务** (crontab):
-```
-0 16 * * 1-5  cd /home/admin/AUTO-STOCK && python3 scripts/daily_download.py
-```
-- 每日16:00（A股收盘后）执行
-- 仅限交易日（通过 `trade_calendar.is_trade_day()` 判断）
-
-**执行流程:**
-```
-is_trade_day() → download_market() → build_price()
-```
-
-### 3.3 数据缓存策略
-- 优先使用本地缓存 (`data/` 目录)
-- 如本地无数据或过期，自动从AKShare下载
-- 分红数据超过120天自动刷新
+详见 `CRON.md`。
 
 ---
 
 ## 4. 常用命令
 
-### 4.1 启动服务
+### 启动服务
 ```bash
-# 启动前端 (3000端口)
-cd /home/admin/AUTO-STOCK/web && npm run dev
-
-# 启动API (8000端口)
-cd /home/admin/AUTO-STOCK && uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
+bash /home/admin/AUTO-STOCK/scripts/start_financial_score.sh
 ```
 
-### 4.2 数据更新
+### 构建前端（需先停 gunicorn 释放内存）
 ```bash
-cd /home/admin/AUTO-STOCK && python3 scripts/daily_download.py
+ps aux | grep gunicorn | grep -v grep | awk '{print $2}' | xargs -r kill
+cd /home/admin/AUTO-STOCK/web/financial-report && npm run build
+cd /home/admin/AUTO-STOCK/web/stock-alert && npm run build
 ```
 
-### 4.3 批量评分
+### 数据更新
 ```bash
-cd /home/admin/AUTO-STOCK && python main.py
-# 选择模式: 1=单股, 2=批量
+python3 scripts/update_data.py
+```
+
+### 批量评分
+```bash
+echo -e "2\nstock_pool.csv\n\n" | python3 main.py
+```
+
+### 重建评分历史
+```bash
+python3 src/analyzer/kline_analyzer.py --force
+```
+
+### Nginx
+```bash
+sudo nginx -t && sudo nginx -s reload
 ```
 
 ---
 
-## 5. 待实现功能
+## 5. 数据自动更新机制
 
-- [ ] 回测引擎 (`src/core/backtest.py`)
-- [ ] 买入/卖出信号提示
-- [ ] 每日评分报告自动生成
+个股预警页面 (`/yujing/`) 的数据通过 Nginx 直接读取源目录：
+
+| 数据 | 源目录 | 更新时机 |
+|------|--------|---------|
+| 个股价格 | `data/price/` | 17:00 daily_download |
+| 评分历史 | `result/score_price_history.csv` | 19:00 evening_pipeline 步骤2 |
+
+更新后刷新网页即可看到最新数据，无需 rebuild 或手动同步。

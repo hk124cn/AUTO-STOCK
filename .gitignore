@@ -26,6 +26,17 @@ web/dist/
 web/dist.backup.*/
 web/node_modules/
 web/package-lock.json
+web/financial-report/dist/
+web/financial-report/node_modules/
+web/financial-report/package-lock.json
+web/stock-alert/dist/
+web/stock-alert/node_modules/
+web/stock-alert/package-lock.json
+
+# generated results
+result/
+reports/daily_report_*.html
+reports/index.html
 
 # pycache
 src/__pycache__/

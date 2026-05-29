@@ -25,6 +25,12 @@ echo -e "1\n600519" | python main.py
 echo -e "2\nstock_pool.csv\nresult" | python main.py
 ```
 
+### 每日晚间流水线（评分→分析→报告）
+```bash
+bash scripts/evening_pipeline.sh           # 默认今天
+bash scripts/evening_pipeline.sh 20260528  # 指定日期
+```
+
 ### 重建行业数据（申万二级）
 ```bash
 python -m src.datafactory.build_industry_data --full
@@ -44,11 +50,11 @@ python -m pytest
 
 已实现的因子（共9个，总分100分）：
 - `src/factors/attention_factor.py` — 关注度因子 (10分)
-- `src/factors/daily_change_factor.py` — 单日涨跌幅因子 (10分) ⭐新增
+- `src/factors/daily_change_factor.py` — 单日涨跌幅因子 (10分)
 - `src/factors/dividend_factor.py` — 股息率因子 (10分)
 - `src/factors/financial_factor.py` — 财务因子 (20分)
 - `src/factors/fiveday_factor.py` — 5日涨跌幅因子 (10分)
-- `src/factors/hy_diff_factor.py` — 行业相对强弱因子 (10分) ⭐已升级为二级行业
+- `src/factors/hy_diff_factor.py` — 行业相对强弱因子 (10分，申万二级)
 - `src/factors/news_factor.py` — 新闻因子 (10分)
 - `src/factors/zj_flow_factor.py` — 资金流向因子 (10分)
 - `src/factors/dp_diff_factor.py` — DP差异因子
@@ -72,27 +78,46 @@ AKShare API → data/daily_market/ → data/price/*.csv (个股)
 - **数据文件**: `data/industry/stock_industry_mapping.csv` (5199只股票)
 - **涨跌幅数据**: `data/industry/change_xxx_20d.csv` (131个行业)
 
-### Web 界面（已完成）
+### Web 界面
+
 ```
-web/ — Vue 3 + Vite + ECharts
+web/
+├── financial-report/    # → /  财报评分（Vue 3 + Vite + ECharts）
+└── stock-alert/         # → /yujing/  个股评分预警图（Vue 3 + Vite + ECharts）
 ```
 
-- **前端服务**: `npm run dev` (端口3000)
-- **后端API**: `uvicorn api.main:app --port 8000`
+**财报评分** (`/`):
 - **页面路由**:
   - `/` — 首页，搜索股票查询财报评分
   - `/detail/:code` — 详情页，分季度查看评分和股价走势
 - **翻转卡片**: 点击按钮卡片3D翻转，显示财报发布后7日股价走势图
-  - Home.vue — 首页翻转（CSS 3D transform + ECharts延迟渲染）
-  - Detail.vue — 详情页翻转 + 季度切换
+
+**个股预警** (`/yujing/`):
+- 搜索股票（代码或名称），回车直接选中
+- 价格K线图（ECharts candlestick，左Y轴，scale:true 动态起点）
+- 评分曲线叠加（右Y轴，默认关闭）
+- Tooltip：中文标签 + 涨跌幅（前日收盘价计算）
+- 时间范围：1M / 3M / 6M / 1Y / All
+- **数据自动更新**：Nginx 直接读取 `data/price/` 和 `result/score_price_history.csv`，无需 rebuild
+
+### 每日报告系统
+- **生成**: `scripts/daily_report.py` — 读取 batch_result，生成 HTML 报告
+- **展示**: `/reports/` — 每日多因子评分网页
+- **功能**: 特别关注股票高亮、收盘价+涨跌幅显示、行业分析
+- **自动更新**: 由 `evening_pipeline.sh` 每日 19:00 后自动生成
+
+### 每日晚间流水线
+```bash
+scripts/evening_pipeline.sh
+```
+串联执行：批量评分 → kline_analyzer → 每日报告，任一步失败会停在该步。
+Cron: `0 19 * * 1-5`
 
 ### 待完成模块
 - **回测引擎**: `src/core/backtest.py` — 目前仅有占位函数
-- **Web 界面**: `web/app.py` — 目前为空文件
-- **主入口**: `src/main.py` — 目前仅有占位代码
 
 ## 数据存储
-- `data/price/*.csv` — 历史日线价格（日期、收盘价、成交额）
+- `data/price/*.csv` — 历史日线价格（日期、收盘价、成交额、开盘、最高、最低）
 - `data/daily_market/*.csv` — 原始日线市场快照
 - `data/finance/` — 财务数据缓存
 - `data/dividend/` — 分红数据缓存
@@ -101,6 +126,8 @@ web/ — Vue 3 + Vite + ECharts
 - `data/fund/` — 5日资金流向数据
 - `data/industry/` — 行业映射+涨跌幅（申万二级）
 - `data/disclosure/*.csv` — 财报披露日期缓存（智能过期）
+- `result/score_price_history.csv` — 评分-价格历史大表（kline_analyzer 生成）
+- `result/daily_score/batch_result_*.csv` — 每日批量评分结果
 
 ## 关键文件
 - `main.py` — 评分入口（单股/批量）
@@ -108,15 +135,18 @@ web/ — Vue 3 + Vite + ECharts
 - `src/datafactory/data_manager.py` — 数据统一访问接口
 - `src/datafactory/build_industry_data.py` — 行业数据构建（申万二级）
 - `src/factors/financial_factor.py` — 财报评分因子（满分20）
-- `src/factors/daily_change_factor.py` — 单日涨跌幅因子（满分10）⭐新增
+- `src/factors/daily_change_factor.py` — 单日涨跌幅因子（满分10）
+- `src/analyzer/kline_analyzer.py` — 评分-价格历史表生成器
 - `api/main.py` — FastAPI 后端服务
-- `web/src/views/Home.vue` — 首页（评分搜索 + 翻转股价图）
-- `web/src/views/Detail.vue` — 详情页（分季度评分 + 翻转股价图）
+- `scripts/evening_pipeline.sh` — 每日晚间流水线
+- `scripts/daily_report.py` — 每日报告生成
+- `scripts/start_financial_score.sh` — 服务启动脚本
+- `web/financial-report/src/views/Home.vue` — 财报评分首页
+- `web/financial-report/src/views/Detail.vue` — 财报评分详情页
+- `web/stock-alert/src/views/StockKline.vue` — 个股预警K线图
+- `web/stock-alert/src/data/loader.js` — 预警数据加载
 
-## 待完成模块
-- **回测引擎**: `src/core/backtest.py` — 目前仅有占位函数
-
-### 评分指标与权重
+## 评分指标与权重
 | 指标 | 权重 | 正增长满分 | 负增长封顶 |
 |------|------|-----------|-----------|
 | 扣非净利润 | 50% | 10分 (40%增长=满分) | -50分 |
