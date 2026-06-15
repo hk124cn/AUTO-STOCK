@@ -24,6 +24,18 @@
    - 现状：`config/config.py:2` 含真实 token
    - 建议：① 在 tushare 控制台轮换 ② `git filter-repo --invert-paths --path config/config.py` ③ `.gitignore` 加 `config/*.py`（保留 `config.example.py`）
    - 详见：09-cross-cutting/SUBREPORT-cross-cutting.md
+   - **进度（2026-06-15）✅ 已完成**：
+     - 用户在 tushare.pro 重置 token，旧 token `616f037d...` 立刻失效，新 token `cfb700db...` 已写入 `.env`
+     - `config/config.py` 改为从 `.env` 读 TUSHARE_TOKEN + API_PASSWORD（轻量 dotenv 加载器，不依赖 python-dotenv）
+     - 新增 `.env.example` 模板（git 跟踪），`.env` 被 `.gitignore` 排除（验证：`git check-ignore .env` 通过）
+     - `deploy/stock-api.service` 加 `EnvironmentFile=-/home/admin/AUTO-STOCK/.env`
+     - 多机协作：本地/云服务器各自维护 `.env`，互不影响
+     - `git filter-repo --replace-text` 把旧 token 和旧 API_PASSWORD 从所有历史 commit 替换为占位符
+     - 删除含旧 token 的遗留分支 `origin/codex/check-status-of-last-pr`
+     - **GitHub 验证**：所有远端 ref 中旧 token 出现 **0** 次，旧 API_PASSWORD 出现 **0** 次
+     - 备份：`.git.backup-before-filter-repo/`（万一需回滚）
+     - commit: `3db04c0 feat(security): API 加密码鉴权 + 密钥 env 化`
+
 
 3. **S3 — `feedbacks.json` 隐私治理** ⏱ 2h
    - 现状：含真实用户 IP（`183.222.203.200`）+ git 跟踪 + 并发不安全
