@@ -1,0 +1,22 @@
+[Unit]
+Description=Stock System FastAPI Service (AUTO-STOCK portfolio + signals)
+After=network.target
+
+[Service]
+Type=simple
+User=admin
+Group=admin
+WorkingDirectory=/home/admin/AUTO-STOCK
+Environment="PYTHONUNBUFFERED=1"
+Environment="PATH=/home/admin/.local/bin:/usr/local/bin:/usr/bin:/bin"
+# 从 .env 加载密钥（TUSHARE_TOKEN / API_PASSWORD）
+# 如果文件不存在不会启动失败（前缀 -），但 config.py 会因缺密钥而 RuntimeError
+EnvironmentFile=-/home/admin/AUTO-STOCK/.env
+ExecStart=/usr/bin/python3 -m uvicorn api.main:app --host 127.0.0.1 --port 8000 --workers 1 --log-level info
+Restart=always
+RestartSec=5
+StandardOutput=append:/home/admin/AUTO-STOCK/logs/api-stdout.log
+StandardError=append:/home/admin/AUTO-STOCK/logs/api-stderr.log
+
+[Install]
+WantedBy=multi-user.target

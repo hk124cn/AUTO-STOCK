@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 import pandas as pd
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
 from pydantic import BaseModel
@@ -15,6 +15,7 @@ from pydantic import BaseModel
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.factors.financial_factor import js_score, get_finance, normalize_code
+from api.security import login as auth_login, verify_token, cleanup_expired_tokens, active_token_count
 
 app = FastAPI(title="财报评分API", version="1.0.0")
 
@@ -71,6 +72,25 @@ logger = logging.getLogger(__name__)
 
 class StockCode(BaseModel):
     code: str
+
+
+class LoginRequest(BaseModel):
+    password: str
+
+
+@app.post("/api/v1/auth/login")
+async def auth_login_endpoint(req: LoginRequest, request: Request):
+    """操作密码登录，返回 24h 有效的 token。
+
+    公开端点（无需 token），但调用本端点说明用户在尝试实操。
+    """
+    client_ip = get_client_ip(request)
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        return auth_login(req.password)
+    except HTTPException as e:
+        logger.info(f"{timestamp} | {client_ip} | 登录失败: {e.detail}")
+        raise
 
 
 def get_client_ip(request: Request) -> str:
@@ -697,5 +717,449 @@ async def get_reports_top(n: int = 10):
             "count": n,
             "data": df_sorted.to_dict('records')
         }
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+# ============================================================
+# 持仓管理 API
+# ============================================================
+# 修复 6.1: 暴露 portfolio 端点
+
+from src.portfolio import TradingManager, PortfolioDB
+from src.portfolio.database import get_db
+from pydantic import BaseModel, Field
+
+
+class BuyRequest(BaseModel):
+    code: str
+    name: str
+    price: float
+    shares: int
+    score: float = None
+    reason: str = None
+    account_id: int = None
+    mode: str = 'SIM'  # SIM=模拟仓, REAL=实盘
+
+
+class SellRequest(BaseModel):
+    code: str
+    price: float
+    shares: int
+    reason: str = None
+    account_id: int = None
+    mode: str = 'SIM'
+
+
+class PriceUpdate(BaseModel):
+    prices: dict  # {code: price}
+
+
+class DividendRequest(BaseModel):
+    code: str
+    name: str
+    ex_date: str
+    dividend_per_share: float
+    account_id: int = None
+    mode: str = 'SIM'
+
+
+def _get_tm(account_id: int = None, mode: str = None) -> TradingManager:
+    if mode:
+        return TradingManager(account_id=account_id, mode=mode)
+    return TradingManager(account_id=account_id)
+
+
+# ============================================================
+# 通用 Portfolio 端点（保持向后兼容，默认 SIM）
+# ============================================================
+
+@app.get("/api/v1/portfolio/account")
+async def get_account(account_id: int = None, mode: str = 'SIM'):
+    """获取账户信息"""
+    try:
+        tm = _get_tm(account_id, mode)
+        return tm.get_account()
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.get("/api/v1/portfolio/positions")
+async def get_positions(account_id: int = None, mode: str = 'SIM'):
+    """获取所有未平仓持仓"""
+    try:
+        tm = _get_tm(account_id, mode)
+        positions = tm.get_positions()
+        for p in positions:
+            price = p.get('current_price') or p['cost_price']
+            p['profit'] = round((price - p['cost_price']) * p['shares'], 2)
+            p['profit_rate'] = round((price - p['cost_price']) / p['cost_price'] * 100, 2) if p['cost_price'] > 0 else 0
+            p['current_price'] = round(price, 2)
+            p['cost_price'] = round(p['cost_price'], 2)
+        return {"count": len(positions), "positions": positions}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.get("/api/v1/portfolio/trades")
+async def get_trades(limit: int = 100, account_id: int = None, mode: str = 'SIM'):
+    """获取交易记录"""
+    try:
+        tm = _get_tm(account_id, mode)
+        return {"count": len(tm.get_trades(limit)), "trades": tm.get_trades(limit)}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.get("/api/v1/portfolio/stats")
+async def get_stats(account_id: int = None, mode: str = 'SIM'):
+    """获取交易统计"""
+    try:
+        tm = _get_tm(account_id, mode)
+        return tm.get_stats()
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.post("/api/v1/portfolio/buy", dependencies=[Depends(verify_token)])
+async def buy_stock(req: BuyRequest):
+    """买入股票"""
+    try:
+        tm = _get_tm(req.account_id, req.mode or 'SIM')
+        result = tm.buy(req.code, req.name, req.price, req.shares,
+                        score=req.score, reason=req.reason,
+                        account_id=req.account_id)
+        if not result['success']:
+            return JSONResponse(status_code=400, content=result)
+        return result
+    except ValueError as e:
+        return JSONResponse(status_code=400, content={"success": False, "error": str(e)})
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
+
+
+@app.post("/api/v1/portfolio/sell", dependencies=[Depends(verify_token)])
+async def sell_stock(req: SellRequest):
+    """卖出股票"""
+    try:
+        tm = _get_tm(req.account_id, req.mode or 'SIM')
+        result = tm.sell(req.code, req.price, req.shares,
+                         reason=req.reason, account_id=req.account_id)
+        if not result['success']:
+            return JSONResponse(status_code=400, content=result)
+        return result
+    except ValueError as e:
+        return JSONResponse(status_code=400, content={"success": False, "error": str(e)})
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
+
+
+@app.post("/api/v1/portfolio/update-prices", dependencies=[Depends(verify_token)])
+async def update_prices(req: PriceUpdate, account_id: int = None, mode: str = 'SIM'):
+    """批量更新持仓价格"""
+    try:
+        tm = _get_tm(account_id, mode)
+        tm.update_prices(req.prices, account_id=account_id)
+        return {"success": True, "updated": len(req.prices)}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.get("/api/v1/portfolio/nav")
+async def get_nav_history(start_date: str = None, end_date: str = None,
+                          account_id: int = None, mode: str = 'SIM'):
+    """获取净值历史"""
+    try:
+        tm = _get_tm(account_id, mode)
+        navs = tm.get_nav_history(start_date, end_date, account_id)
+        return {"count": len(navs), "navs": navs}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.post("/api/v1/portfolio/snapshot", dependencies=[Depends(verify_token)])
+async def save_snapshot(date: str = None, account_id: int = None, mode: str = 'SIM'):
+    """保存每日净值快照"""
+    try:
+        tm = _get_tm(account_id, mode)
+        return tm.save_snapshot(date, account_id)
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.post("/api/v1/portfolio/dividend", dependencies=[Depends(verify_token)])
+async def record_dividend(req: DividendRequest):
+    """记录分红派息"""
+    try:
+        tm = _get_tm(req.account_id, req.mode or 'SIM')
+        return tm.record_dividend(req.code, req.name, req.ex_date,
+                                   req.dividend_per_share, req.account_id)
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+# ============================================================
+# 账户管理（修改总资产 / 删除交易）
+# ============================================================
+
+class UpdateCapitalRequest(BaseModel):
+    initial_capital: float
+    mode: str = 'SIM'
+
+
+class DeleteTradeRequest(BaseModel):
+    trade_id: int
+    mode: str = 'SIM'
+
+
+@app.post("/api/v1/portfolio/update-capital", dependencies=[Depends(verify_token)])
+async def update_capital_endpoint(req: UpdateCapitalRequest):
+    """修改账户初始资金（同时重置账户）"""
+    try:
+        tm = _get_tm(None, req.mode)
+        return tm.update_initial_capital(req.initial_capital)
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.post("/api/v1/portfolio/delete-trade", dependencies=[Depends(verify_token)])
+async def delete_trade_endpoint(req: DeleteTradeRequest):
+    """删除单条交易记录"""
+    try:
+        tm = _get_tm(None, req.mode)
+        return tm.delete_trade(req.trade_id)
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+# ============================================================
+# 策略管理 API
+# ============================================================
+
+class StrategyRequest(BaseModel):
+    name: str
+    buy_threshold: float = 30.0
+    take_profit: float = 0.20
+    stop_loss: float = 0.08
+    cooldown_days: int = 1
+    max_position_pct: float = 0.20
+    max_positions: int = 5
+    description: str = None
+    is_default: int = 0
+
+
+class StrategyUpdateRequest(BaseModel):
+    name: str = None
+    buy_threshold: float = None
+    take_profit: float = None
+    stop_loss: float = None
+    cooldown_days: int = None
+    max_position_pct: float = None
+    max_positions: int = None
+    description: str = None
+    is_default: int = None
+
+
+class SetAccountStrategyRequest(BaseModel):
+    account_id: int
+    strategy_id: int
+
+
+@app.get("/api/v1/strategies")
+async def list_strategies():
+    """列出所有策略"""
+    try:
+        db = get_db()
+        return {'strategies': db.list_strategies()}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.post("/api/v1/strategies", dependencies=[Depends(verify_token)])
+async def create_strategy(req: StrategyRequest):
+    """创建策略"""
+    try:
+        db = get_db()
+        sid = db.create_strategy(
+            name=req.name, buy_threshold=req.buy_threshold,
+            take_profit=req.take_profit, stop_loss=req.stop_loss,
+            cooldown_days=req.cooldown_days,
+            max_position_pct=req.max_position_pct,
+            max_positions=req.max_positions,
+            description=req.description, is_default=req.is_default
+        )
+        return {'success': True, 'strategy_id': sid}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.put("/api/v1/strategies/{strategy_id}", dependencies=[Depends(verify_token)])
+async def update_strategy(strategy_id: int, req: StrategyUpdateRequest):
+    """更新策略"""
+    try:
+        db = get_db()
+        kwargs = {k: v for k, v in req.dict().items() if v is not None}
+        return db.update_strategy(strategy_id, **kwargs)
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.delete("/api/v1/strategies/{strategy_id}", dependencies=[Depends(verify_token)])
+async def delete_strategy(strategy_id: int):
+    """删除策略"""
+    try:
+        db = get_db()
+        return db.delete_strategy(strategy_id)
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.get("/api/v1/portfolio/strategy")
+async def get_account_strategy(mode: str = 'SIM'):
+    """获取当前账户的策略"""
+    try:
+        tm = _get_tm(None, mode)
+        return tm.get_strategy()
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.post("/api/v1/portfolio/strategy", dependencies=[Depends(verify_token)])
+async def set_account_strategy(req: SetAccountStrategyRequest):
+    """设置账户的策略"""
+    try:
+        db = get_db()
+        return db.set_account_strategy(req.account_id, req.strategy_id)
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+# ============================================================
+# 回测结果（用于策略页 TOP 10 展示）
+# ============================================================
+
+@app.get("/api/v1/backtest/top")
+async def get_backtest_top(n: int = 10):
+    """获取回测排名前 N 的策略"""
+    try:
+        import re
+        backtest_dir = Path(__file__).parent.parent / "result" / "backtest"
+        if not backtest_dir.exists():
+            return {'results': []}
+
+        results = []
+        # 递归扫描所有 README.md
+        for readme in backtest_dir.glob("**/README.md"):
+            try:
+                with open(readme) as f:
+                    content = f.read()
+                m_total = re.search(r'总收益[^\d\-+\s]*([\-\d.]+)%', content)
+                m_annual = re.search(r'年化(?:收益)?[^\d\-+\s]*([\-\d.]+)%', content)
+                m_maxdd = re.search(r'最大回撤[^\d\-+\s]*([\-\d.]+)%', content)
+                m_sharpe = re.search(r'夏普(?:比率)?[^\d\-+\s]*([\-\d.]+)', content)
+                m_winrate = re.search(r'胜率[^\d\-+\s]*([\-\d.]+)%', content)
+                m_buy = re.search(r'买入阈值[：:\s]*[≥>]?\s*(\d+)', content)
+                m_tp = re.search(r'止盈[：:\s]*(\d+)%', content)
+                m_sl = re.search(r'止损[：:\s]*(\d+)%', content)
+
+                # 路径作为策略名
+                rel = readme.relative_to(backtest_dir)
+                name = str(rel.parent).replace('/', ' / ')
+
+                results.append({
+                    'name': name,
+                    'total_return': float(m_total.group(1)) if m_total else None,
+                    'annual_return': float(m_annual.group(1)) if m_annual else None,
+                    'max_drawdown': float(m_maxdd.group(1)) if m_maxdd else None,
+                    'sharpe': float(m_sharpe.group(1)) if m_sharpe else None,
+                    'win_rate': float(m_winrate.group(1)) if m_winrate else None,
+                    'buy_threshold': float(m_buy.group(1)) if m_buy else None,
+                    'take_profit': float(m_tp.group(1)) if m_tp else None,
+                    'stop_loss': float(m_sl.group(1)) if m_sl else None,
+                    'readme': str(rel)
+                })
+            except Exception:
+                continue
+
+        # 按年化收益排序
+        results.sort(key=lambda x: (x.get('annual_return') or -999), reverse=True)
+        return {'results': results[:n]}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+# ============================================================
+# 信号 API（修复 6.1 配套）
+# ============================================================
+
+@app.get("/api/v1/signals/latest")
+async def get_latest_signals():
+    """获取最新信号"""
+    try:
+        signals_dir = Path(__file__).parent.parent / "result" / "signals"
+        # 优先 signals_latest.csv，否则取最新 signals_YYYYMMDD.csv
+        signal_file = signals_dir / "signals_latest.csv"
+        if not signal_file.exists():
+            files = sorted(signals_dir.glob("signals_*.csv"))
+            # 排除临时文件
+            files = [f for f in files if not f.stem.endswith('.tmp')]
+            if not files:
+                return JSONResponse(status_code=404, content={"error": "信号数据不存在，请先运行 calc_signals.py"})
+            signal_file = files[-1]
+        df = pd.read_csv(signal_file, dtype={'code': str})
+
+        # 提取日期：优先 CSV 内的 date 列；兜底从文件名取
+        if 'date' in df.columns and not df['date'].isna().all():
+            file_date = str(df['date'].iloc[0])
+        else:
+            file_date = signal_file.stem.replace('signals_', '')
+            if file_date == 'signals_latest':
+                file_date = datetime.now().strftime('%Y%m%d')
+
+        df = df.fillna(value="")
+        records = []
+        for _, row in df.iterrows():
+            records.append({
+                'date': str(row.get('date', '') or file_date),
+                'code': str(row.get('code', '') or ''),
+                'name': str(row.get('name', '') or ''),
+                'close_price': float(row['close_price']) if pd.notna(row.get('close_price')) else None,
+                'current_score': float(row['current_score']) if pd.notna(row.get('current_score')) else None,
+                'avg7_score': float(row['avg7_score']) if pd.notna(row.get('avg7_score')) else None,
+                'signal': str(row.get('signal', '') or ''),
+            })
+        return {"date": file_date, "count": len(records), "data": records}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.get("/api/v1/scores/latest")
+async def get_latest_scores(n: int = None):
+    """获取最新评分结果"""
+    try:
+        from datetime import datetime
+        result_dir = Path(__file__).parent.parent / "result" / "daily_score"
+        files = sorted(result_dir.glob("batch_result_*.csv"))
+        if not files:
+            return JSONResponse(status_code=404, content={"error": "评分数据不存在"})
+        df = pd.read_csv(files[-1], dtype={'code': str})
+        if n:
+            df = df.sort_values('total_score', ascending=False).head(n)
+        file_date = files[-1].stem.replace('batch_result_', '')
+        records = []
+        for _, row in df.iterrows():
+            r = {'date': file_date}
+            for k, v in row.to_dict().items():
+                if pd.isna(v):
+                    r[k] = None
+                elif hasattr(v, 'item'):
+                    try:
+                        r[k] = v.item()
+                    except Exception:
+                        r[k] = str(v)
+                else:
+                    r[k] = v
+            records.append(r)
+        return {"date": file_date, "count": len(records), "data": records}
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})

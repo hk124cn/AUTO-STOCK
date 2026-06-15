@@ -56,3 +56,9 @@ private.*
 
 # os
 .DS_Store
+
+# === secrets ===
+# 密钥/密码：每台机器维护自己的 .env，永远不进 git
+.env
+.env.local
+.env.*.local
