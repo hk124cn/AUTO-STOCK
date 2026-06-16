@@ -72,6 +72,7 @@ def build_history_for_date(score_date: str) -> pd.DataFrame:
         code = str(row.get('code', '')).zfill(6)
         name = str(row.get('name', ''))
         score = float(row.get('total_score', 0))
+        finance_score = float(row.get('财报', 0))
 
         close_price = load_price(code, score_date)
         if close_price is None:
@@ -83,6 +84,7 @@ def build_history_for_date(score_date: str) -> pd.DataFrame:
             'name': name,
             'close_price': close_price,
             'total_score': score,
+            'finance_score': finance_score,
         })
 
     return pd.DataFrame(records)

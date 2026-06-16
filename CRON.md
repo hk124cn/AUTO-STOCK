@@ -8,7 +8,7 @@
 
 | 时间 | 任务 | 脚本 | 说明 |
 |------|------|------|------|
-| 17:00 | 拉取当天市场数据 | `scripts/daily_download.sh` | 下载价格、资金流向、行业等 |
+| 17:00 | 拉取当天市场数据 | `scripts/daily_data_fetch.py` | 下载价格、资金流向、行业等 |
 | 18:00 | 生成未来收益标签 | `scripts/daily_future_return.sh` | 计算5d/10d/20d收益 |
 | 19:00 | 晚间流水线 | `scripts/evening_pipeline.sh` | 评分→分析→报告（串联执行） |
 
@@ -42,7 +42,7 @@
     │
     ▼
 ┌─────────────────┐
-│ daily_download   │  拉取当日市场数据
+│ daily_data_fetch │  拉取当日市场数据
 │ (scripts/)      │  - 价格数据 → data/price/
 └────────┬────────┘  - 资金流向 → data/fund/
          │          - 行业涨幅 → data/industry/
@@ -82,11 +82,11 @@
 
 ```
 数据层 (data/)
-├── price/          ← daily_download 下载
+├── price/          ← daily_data_fetch 下载
 ├── finance/        ← 定期更新
 ├── dividend/       ← 定期更新
-├── industry/       ← daily_download 下载
-└── fund/           ← daily_download 下载
+├── industry/       ← daily_data_fetch 下载
+└── fund/           ← daily_data_fetch 下载
          │
          ▼
 评分层 (result/)
@@ -104,7 +104,7 @@
 
 | 数据 | Nginx 路径 | 源目录 | 更新时机 |
 |------|-----------|--------|---------|
-| 个股价格 | `/yujing/data/price/` | `data/price/` | 17:00 daily_download |
+| 个股价格 | `/yujing/data/price/` | `data/price/` | 17:00 daily_data_fetch |
 | 评分历史 | `/yujing/data/score_price_history.csv` | `result/score_price_history.csv` | 19:00 evening_pipeline 步骤2 |
 | 每日报告 | `/reports/` | `reports/` | 19:00 evening_pipeline 步骤3 |
 
@@ -136,7 +136,7 @@ python3 src/analyzer/kline_analyzer.py --force
 | 日志 | 路径 |
 |------|------|
 | 晚间流水线 | `logs/evening_pipeline_YYYYMMDD.log` |
-| 数据下载 | `logs/daily_download_YYYYMMDD.log` |
+| 数据下载 | `logs/daily_data_fetch_YYYYMMDD.log` |
 | 未来收益 | `logs/future_return_YYYYMMDD.log` |
 | Gunicorn | `/tmp/gunicorn.log` |
 | Nginx | `/var/log/nginx/` |

@@ -85,9 +85,9 @@ def run_batch(csv_file,in_fname):
     result_df = result_df[cols]
     result_df = result_df.sort_values(by="total_score", ascending=False)
     if in_fname =='':
-        filename = f"./src/result/batch_result_{datetime.today().strftime('%Y%m%d')}.csv"
+        filename = f"./result/daily_score/batch_result_{datetime.today().strftime('%Y%m%d')}.csv"
     else:
-        filename = f"./src/result/{in_fname}.csv"
+        filename = f"./result/daily_score/{in_fname}.csv"
     result_df.to_csv(filename, index=False) 
     print(f"批量评分完成，结果已保存在 {filename}")
 

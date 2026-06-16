@@ -62,3 +62,22 @@ private.*
 .env
 .env.local
 .env.*.local
+
+# 用户反馈（含真实 IP，不进 git）
+feedbacks.json
+
+# 运行时数据库（持仓数据）
+data/portfolio.db
+data/portfolio.db-shm
+data/portfolio.db-wal
+
+# 第三方依赖
+miniprogram/node_modules/
+web/stock-system/node_modules/
+
+# 临时备份
+meta/
+
+# === 软删除目录 ===
+# .trash/ 是 "想删但不敢立刻删" 的文件归宿，过 2-4 周后彻底删
+.trash/

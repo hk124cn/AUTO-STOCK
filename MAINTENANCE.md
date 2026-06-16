@@ -9,21 +9,32 @@
          ├─→ /yujing/       个股评分预警图（Vue App 静态文件）
          ├─→ /api/          FastAPI 后端（8000端口）
          └─→ /api/generate_report  报告生成（8766端口）
+
+用户访问: https://stock.auto-claw.top/
+         ├─→ /              股票操作系统（信号监控+持仓管理）
+         ├─→ /signals       信号监控（v1/v2 策略）
+         ├─→ /portfolio     持仓管理
+         ├─→ /stats         收益统计
+         └─→ /api/          FastAPI 后端（8000端口）
 ```
 
 **目录结构:**
 ```
 AUTO-STOCK/
-├── main.py              # 命令行批量评分入口
+├── main.py              # 命令行批量评分入口（输出到 result/daily_score/）
 ├── api/main.py          # FastAPI HTTP服务 (端口8000)
 ├── web/
 │   ├── financial-report/   # → /  财报评分 Vue App
 │   ├── stock-alert/        # → /yujing/  个股预警 Vue App
+│   ├── stock-system/       # → stock.auto-claw.top  股票操作系统
 │   └── maintenance.html    # 维护页面
 ├── reports/             # → /reports/  每日报告
+│   └── individual/      # 个股深度分析报告
 ├── result/              # 评分结果
-│   ├── daily_score/     # batch_result_*.csv
-│   └── score_price_history.csv  # 评分-价格历史大表
+│   ├── daily_score/     # batch_result_*.csv（唯一权威数据源）
+│   ├── score_price_history.csv  # 评分-价格历史大表（含 finance_score）
+│   ├── signals/         # 信号数据（v1/v2 策略）
+│   └── future_returns/  # 未来收益标签
 ├── data/                # 本地数据缓存
 │   ├── price/           # 个股价格数据（Nginx 直接读取）
 │   ├── finance/         # 财务数据缓存
@@ -31,14 +42,19 @@ AUTO-STOCK/
 │   ├── daily_market/    # 每日市场快照
 │   ├── attention/       # 关注度数据
 │   ├── fund/            # 资金流向数据
-│   └── industry/        # 行业映射+涨跌幅
+│   ├── industry/        # 行业映射+涨跌幅
+│   └── portfolio.db     # 持仓管理数据库
 ├── src/                 # 评分系统源码
 │   ├── core/            # 核心模块
 │   ├── factors/         # 因子实现（9个因子）
 │   ├── datafactory/     # 数据层
-│   └── analyzer/        # 分析器（kline_analyzer）
+│   ├── analyzer/        # 分析器（kline_analyzer）
+│   ├── backtest/        # 回测系统（策略、评分器、引擎）
+│   └── portfolio/       # 持仓管理模块
 └── scripts/
     ├── evening_pipeline.sh      # 每日晚间流水线
+    ├── calc_signals.py          # 每日信号计算（v1/v2）
+    ├── stock_analysis.py        # 个股深度分析
     ├── daily_report.py          # 每日报告生成
     ├── start_financial_score.sh # 启动服务脚本
     └── report_api.py            # 报告生成API
@@ -95,9 +111,10 @@ location /api/ {
 
 | 时间 | 任务 | 脚本 |
 |------|------|------|
-| 17:00 | 拉取市场数据 | `scripts/daily_download.sh` |
+| 17:00 | 拉取市场数据 | `scripts/daily_data_fetch.py` |
 | 18:00 | 未来收益标签 | `scripts/daily_future_return.sh` |
 | 19:00 | 晚间流水线 | `scripts/evening_pipeline.sh`（评分→分析→报告）|
+| 19:30 | 信号计算 | `scripts/calc_signals.py`（v1 + v2）|
 
 详见 `CRON.md`。
 
@@ -145,7 +162,7 @@ sudo nginx -t && sudo nginx -s reload
 
 | 数据 | 源目录 | 更新时机 |
 |------|--------|---------|
-| 个股价格 | `data/price/` | 17:00 daily_download |
+| 个股价格 | `data/price/` | 17:00 daily_data_fetch |
 | 评分历史 | `result/score_price_history.csv` | 19:00 evening_pipeline 步骤2 |
 
 更新后刷新网页即可看到最新数据，无需 rebuild 或手动同步。

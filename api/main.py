@@ -44,10 +44,23 @@ def load_stock_pool():
     except Exception as e:
         print(f"加载股票池失败: {e}")
 
-# CORS配置
+# CORS配置（白名单，支持本地开发）
+ALLOWED_ORIGINS = [
+    "https://auto-claw.top",
+    "https://www.auto-claw.top",
+    "https://stock.auto-claw.top",
+    # 本地开发
+    "http://localhost:3000",
+    "http://localhost:3001",
+    "http://localhost:5173",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:3001",
+    "http://127.0.0.1:5173",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -68,6 +81,23 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
+
+
+def safe_error_response(e: Exception, status_code: int = 500, extra: dict = None):
+    """错误返回脱敏：详细错误写日志，前端只看到通用提示
+
+    Args:
+        e: 异常对象
+        status_code: HTTP 状态码
+        extra: 额外字段（如 code），合并到 response
+    """
+    logger.error(f"API error: {type(e).__name__}: {e}")
+    content = {"error": "服务器内部错误"}
+    if status_code == 400:
+        content["error"] = "请求参数错误"
+    if extra:
+        content.update(extra)
+    return JSONResponse(status_code=status_code, content=content)
 
 
 class StockCode(BaseModel):
@@ -500,7 +530,7 @@ async def get_financial_score(code: str, request: Request, refresh: bool = False
 
     except Exception as e:
         logger.info(f"{timestamp} | {client_ip} | {code_normalized} | 失败: {str(e)}")
-        return JSONResponse(status_code=500, content={"error": str(e), "code": code_normalized})
+        return safe_error_response(e, status_code=500, extra={"code": code_normalized})
 
 
 @app.get("/api/v1/financial/detail/{code}")
@@ -538,7 +568,7 @@ async def get_financial_detail(code: str, request: Request, refresh: bool = Fals
 
     except Exception as e:
         logger.info(f"{timestamp} | {client_ip} | {code_normalized} | 详情查询失败: {str(e)}")
-        return JSONResponse(status_code=500, content={"error": str(e), "code": code_normalized})
+        return safe_error_response(e, status_code=500, extra={"code": code_normalized})
 
 
 if __name__ == "__main__":
@@ -592,7 +622,7 @@ async def get_financial_kline(code: str, quarter: str = "本季度", request: Re
 
     except Exception as e:
         logger.info(f"{timestamp} | {client_ip} | {code_normalized} | K线查询失败: {str(e)}")
-        return JSONResponse(status_code=500, content={"error": str(e), "code": code_normalized})
+        return safe_error_response(e, status_code=500, extra={"code": code_normalized})
 
 
 # 建议反馈 API
@@ -639,7 +669,7 @@ async def submit_feedback(feedback: Feedback, request: Request):
 
     except Exception as e:
         logger.info(f"{timestamp} | {client_ip} | 建议提交失败: {str(e)}")
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        return safe_error_response(e, status_code=500)
 
 
 # 股票搜索API
@@ -650,7 +680,7 @@ async def search_reports(q: str):
     from datetime import datetime
 
     today_str = datetime.now().strftime("%Y%m%d")
-    result_file = Path(__file__).parent.parent / "src" / "result" / f"batch_result_{today_str}.csv"
+    result_file = Path(__file__).parent.parent / "result" / "daily_score" / f"batch_result_{today_str}.csv"
 
     if not result_file.exists():
         return []
@@ -672,12 +702,12 @@ async def get_today_reports():
     """获取今日多因子评分报告数据（从batch_result_YYYYMMDD.csv读取）"""
     from datetime import datetime
     today_str = datetime.now().strftime("%Y%m%d")
-    result_file = Path(__file__).parent.parent / "src" / "result" / f"batch_result_{today_str}.csv"
+    result_file = Path(__file__).parent.parent / "result" / "daily_score" / f"batch_result_{today_str}.csv"
     date_str = today_str
 
     # 如果今日文件不存在，查找最新可用文件
     if not result_file.exists():
-        result_dir = Path(__file__).parent.parent / "src" / "result"
+        result_dir = Path(__file__).parent.parent / "result" / "daily_score"
         csv_files = sorted(result_dir.glob("batch_result_*.csv"), reverse=True)
         if csv_files:
             result_file = csv_files[0]
@@ -696,7 +726,7 @@ async def get_today_reports():
             "data": records
         }
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        return safe_error_response(e, status_code=500)
 
 
 @app.get("/api/v1/reports/top")
@@ -704,7 +734,7 @@ async def get_reports_top(n: int = 10):
     """获取评分TOP N股票"""
     from datetime import datetime
     today_str = datetime.now().strftime("%Y%m%d")
-    result_file = Path(__file__).parent.parent / "src" / "result" / f"batch_result_{today_str}.csv"
+    result_file = Path(__file__).parent.parent / "result" / "daily_score" / f"batch_result_{today_str}.csv"
 
     if not result_file.exists():
         return JSONResponse(status_code=404, content={"error": f"今日({today_str})报告数据不存在"})
@@ -718,7 +748,7 @@ async def get_reports_top(n: int = 10):
             "data": df_sorted.to_dict('records')
         }
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        return safe_error_response(e, status_code=500)
 
 
 # ============================================================
@@ -781,7 +811,7 @@ async def get_account(account_id: int = None, mode: str = 'SIM'):
         tm = _get_tm(account_id, mode)
         return tm.get_account()
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        return safe_error_response(e, status_code=500)
 
 
 @app.get("/api/v1/portfolio/positions")
@@ -798,7 +828,7 @@ async def get_positions(account_id: int = None, mode: str = 'SIM'):
             p['cost_price'] = round(p['cost_price'], 2)
         return {"count": len(positions), "positions": positions}
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        return safe_error_response(e, status_code=500)
 
 
 @app.get("/api/v1/portfolio/trades")
@@ -808,7 +838,7 @@ async def get_trades(limit: int = 100, account_id: int = None, mode: str = 'SIM'
         tm = _get_tm(account_id, mode)
         return {"count": len(tm.get_trades(limit)), "trades": tm.get_trades(limit)}
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        return safe_error_response(e, status_code=500)
 
 
 @app.get("/api/v1/portfolio/stats")
@@ -818,7 +848,7 @@ async def get_stats(account_id: int = None, mode: str = 'SIM'):
         tm = _get_tm(account_id, mode)
         return tm.get_stats()
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        return safe_error_response(e, status_code=500)
 
 
 @app.post("/api/v1/portfolio/buy", dependencies=[Depends(verify_token)])
@@ -833,9 +863,9 @@ async def buy_stock(req: BuyRequest):
             return JSONResponse(status_code=400, content=result)
         return result
     except ValueError as e:
-        return JSONResponse(status_code=400, content={"success": False, "error": str(e)})
+        return safe_error_response(e, status_code=400, extra={"success": False})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
+        return safe_error_response(e, status_code=500, extra={"success": False})
 
 
 @app.post("/api/v1/portfolio/sell", dependencies=[Depends(verify_token)])
@@ -849,9 +879,9 @@ async def sell_stock(req: SellRequest):
             return JSONResponse(status_code=400, content=result)
         return result
     except ValueError as e:
-        return JSONResponse(status_code=400, content={"success": False, "error": str(e)})
+        return safe_error_response(e, status_code=400, extra={"success": False})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
+        return safe_error_response(e, status_code=500, extra={"success": False})
 
 
 @app.post("/api/v1/portfolio/update-prices", dependencies=[Depends(verify_token)])
@@ -862,7 +892,7 @@ async def update_prices(req: PriceUpdate, account_id: int = None, mode: str = 'S
         tm.update_prices(req.prices, account_id=account_id)
         return {"success": True, "updated": len(req.prices)}
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        return safe_error_response(e, status_code=500)
 
 
 @app.get("/api/v1/portfolio/nav")
@@ -874,7 +904,7 @@ async def get_nav_history(start_date: str = None, end_date: str = None,
         navs = tm.get_nav_history(start_date, end_date, account_id)
         return {"count": len(navs), "navs": navs}
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        return safe_error_response(e, status_code=500)
 
 
 @app.post("/api/v1/portfolio/snapshot", dependencies=[Depends(verify_token)])
@@ -884,7 +914,7 @@ async def save_snapshot(date: str = None, account_id: int = None, mode: str = 'S
         tm = _get_tm(account_id, mode)
         return tm.save_snapshot(date, account_id)
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        return safe_error_response(e, status_code=500)
 
 
 @app.post("/api/v1/portfolio/dividend", dependencies=[Depends(verify_token)])
@@ -895,7 +925,7 @@ async def record_dividend(req: DividendRequest):
         return tm.record_dividend(req.code, req.name, req.ex_date,
                                    req.dividend_per_share, req.account_id)
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        return safe_error_response(e, status_code=500)
 
 
 # ============================================================
@@ -919,7 +949,7 @@ async def update_capital_endpoint(req: UpdateCapitalRequest):
         tm = _get_tm(None, req.mode)
         return tm.update_initial_capital(req.initial_capital)
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        return safe_error_response(e, status_code=500)
 
 
 @app.post("/api/v1/portfolio/delete-trade", dependencies=[Depends(verify_token)])
@@ -929,7 +959,7 @@ async def delete_trade_endpoint(req: DeleteTradeRequest):
         tm = _get_tm(None, req.mode)
         return tm.delete_trade(req.trade_id)
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        return safe_error_response(e, status_code=500)
 
 
 # ============================================================
@@ -972,7 +1002,7 @@ async def list_strategies():
         db = get_db()
         return {'strategies': db.list_strategies()}
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        return safe_error_response(e, status_code=500)
 
 
 @app.post("/api/v1/strategies", dependencies=[Depends(verify_token)])
@@ -990,7 +1020,7 @@ async def create_strategy(req: StrategyRequest):
         )
         return {'success': True, 'strategy_id': sid}
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        return safe_error_response(e, status_code=500)
 
 
 @app.put("/api/v1/strategies/{strategy_id}", dependencies=[Depends(verify_token)])
@@ -1001,7 +1031,7 @@ async def update_strategy(strategy_id: int, req: StrategyUpdateRequest):
         kwargs = {k: v for k, v in req.dict().items() if v is not None}
         return db.update_strategy(strategy_id, **kwargs)
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        return safe_error_response(e, status_code=500)
 
 
 @app.delete("/api/v1/strategies/{strategy_id}", dependencies=[Depends(verify_token)])
@@ -1011,7 +1041,7 @@ async def delete_strategy(strategy_id: int):
         db = get_db()
         return db.delete_strategy(strategy_id)
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        return safe_error_response(e, status_code=500)
 
 
 @app.get("/api/v1/portfolio/strategy")
@@ -1021,7 +1051,7 @@ async def get_account_strategy(mode: str = 'SIM'):
         tm = _get_tm(None, mode)
         return tm.get_strategy()
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        return safe_error_response(e, status_code=500)
 
 
 @app.post("/api/v1/portfolio/strategy", dependencies=[Depends(verify_token)])
@@ -1031,7 +1061,7 @@ async def set_account_strategy(req: SetAccountStrategyRequest):
         db = get_db()
         return db.set_account_strategy(req.account_id, req.strategy_id)
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        return safe_error_response(e, status_code=500)
 
 
 # ============================================================
@@ -1040,52 +1070,58 @@ async def set_account_strategy(req: SetAccountStrategyRequest):
 
 @app.get("/api/v1/backtest/top")
 async def get_backtest_top(n: int = 10):
-    """获取回测排名前 N 的策略"""
+    """获取回测排名前 N 的策略（从 grid_results.csv 读取，结构化数据）"""
     try:
-        import re
         backtest_dir = Path(__file__).parent.parent / "result" / "backtest"
         if not backtest_dir.exists():
             return {'results': []}
 
         results = []
-        # 递归扫描所有 README.md
-        for readme in backtest_dir.glob("**/README.md"):
+        # 扫描所有 grid_results.csv（按总评分排序的最优策略）
+        for csv_file in backtest_dir.glob("**/grid_results.csv"):
             try:
-                with open(readme) as f:
-                    content = f.read()
-                m_total = re.search(r'总收益[^\d\-+\s]*([\-\d.]+)%', content)
-                m_annual = re.search(r'年化(?:收益)?[^\d\-+\s]*([\-\d.]+)%', content)
-                m_maxdd = re.search(r'最大回撤[^\d\-+\s]*([\-\d.]+)%', content)
-                m_sharpe = re.search(r'夏普(?:比率)?[^\d\-+\s]*([\-\d.]+)', content)
-                m_winrate = re.search(r'胜率[^\d\-+\s]*([\-\d.]+)%', content)
-                m_buy = re.search(r'买入阈值[：:\s]*[≥>]?\s*(\d+)', content)
-                m_tp = re.search(r'止盈[：:\s]*(\d+)%', content)
-                m_sl = re.search(r'止损[：:\s]*(\d+)%', content)
+                df = pd.read_csv(csv_file)
+                if df.empty:
+                    continue
+                best = df.iloc[0]
 
                 # 路径作为策略名
-                rel = readme.relative_to(backtest_dir)
+                rel = csv_file.relative_to(backtest_dir)
+                # v1_每日触发_资金浮动/2026/grid_results.csv → "v1_每日触发_资金浮动 / 2026"
                 name = str(rel.parent).replace('/', ' / ')
+
+                # 读同目录 README 获取描述
+                readme_path = csv_file.parent / "README.md"
+                description = ''
+                if readme_path.exists():
+                    with open(readme_path) as f:
+                        # 只取前 5 行作为描述
+                        lines = f.readlines()[:5]
+                        description = ' '.join(l.strip().lstrip('#').strip() for l in lines if l.strip())
 
                 results.append({
                     'name': name,
-                    'total_return': float(m_total.group(1)) if m_total else None,
-                    'annual_return': float(m_annual.group(1)) if m_annual else None,
-                    'max_drawdown': float(m_maxdd.group(1)) if m_maxdd else None,
-                    'sharpe': float(m_sharpe.group(1)) if m_sharpe else None,
-                    'win_rate': float(m_winrate.group(1)) if m_winrate else None,
-                    'buy_threshold': float(m_buy.group(1)) if m_buy else None,
-                    'take_profit': float(m_tp.group(1)) if m_tp else None,
-                    'stop_loss': float(m_sl.group(1)) if m_sl else None,
-                    'readme': str(rel)
+                    'total_return': float(best.get('total_return', 0)) if pd.notna(best.get('total_return')) else None,
+                    'annual_return': float(best.get('annual_return', 0)) if pd.notna(best.get('annual_return')) else None,
+                    'max_drawdown': float(best.get('max_dd', 0)) if pd.notna(best.get('max_dd')) else None,
+                    'sharpe': float(best.get('sharpe', 0)) if pd.notna(best.get('sharpe')) else None,
+                    'win_rate': float(best.get('win_rate', 0)) if pd.notna(best.get('win_rate')) else None,
+                    'buy_threshold': float(best.get('buy_threshold', 0)) if pd.notna(best.get('buy_threshold')) else None,
+                    'take_profit': float(best.get('take_profit', 0)) if pd.notna(best.get('take_profit')) else None,
+                    'stop_loss': float(best.get('stop_loss', 0)) if pd.notna(best.get('stop_loss')) else None,
+                    'cooldown_days': int(best.get('cooldown_days', 0)) if pd.notna(best.get('cooldown_days')) else None,
+                    'trades': int(best.get('trades', 0)) if pd.notna(best.get('trades')) else None,
+                    'period': name.split(' / ')[-1] if ' / ' in name else '',
+                    'description': description,
                 })
             except Exception:
                 continue
 
-        # 按年化收益排序
-        results.sort(key=lambda x: (x.get('annual_return') or -999), reverse=True)
+        # 按夏普排序（比年化收益更稳定）
+        results.sort(key=lambda x: (x.get('sharpe') or -999), reverse=True)
         return {'results': results[:n]}
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        return safe_error_response(e, status_code=500)
 
 
 # ============================================================
@@ -1093,10 +1129,16 @@ async def get_backtest_top(n: int = 10):
 # ============================================================
 
 @app.get("/api/v1/signals/latest")
-async def get_latest_signals():
-    """获取最新信号"""
+async def get_latest_signals(version: str = "v1"):
+    """获取最新信号（支持策略版本切换）
+
+    Args:
+        version: 策略版本（v1/v2/...），默认 v1。可用版本见 /api/v1/strategies/versions
+    """
     try:
-        signals_dir = Path(__file__).parent.parent / "result" / "signals"
+        from src.backtest.strategies import get_strategy
+        strategy = get_strategy(version)  # 未知版本直接抛 500
+        signals_dir = Path(__file__).parent.parent / "result" / "signals" / strategy.output_subdir
         # 优先 signals_latest.csv，否则取最新 signals_YYYYMMDD.csv
         signal_file = signals_dir / "signals_latest.csv"
         if not signal_file.exists():
@@ -1104,7 +1146,9 @@ async def get_latest_signals():
             # 排除临时文件
             files = [f for f in files if not f.stem.endswith('.tmp')]
             if not files:
-                return JSONResponse(status_code=404, content={"error": "信号数据不存在，请先运行 calc_signals.py"})
+                return JSONResponse(status_code=404, content={
+                    "error": f"信号数据不存在（version={version}），请先运行 calc_signals.py --strategy-version {version}"
+                })
             signal_file = files[-1]
         df = pd.read_csv(signal_file, dtype={'code': str})
 
@@ -1119,18 +1163,78 @@ async def get_latest_signals():
         df = df.fillna(value="")
         records = []
         for _, row in df.iterrows():
+            # pd.notna('') 返回 True（空字符串不是 NA），所以加 None 兜底
+            def _f(k):
+                v = row.get(k)
+                if v is None or v == '':
+                    return None
+                return float(v)
             records.append({
                 'date': str(row.get('date', '') or file_date),
                 'code': str(row.get('code', '') or ''),
                 'name': str(row.get('name', '') or ''),
-                'close_price': float(row['close_price']) if pd.notna(row.get('close_price')) else None,
-                'current_score': float(row['current_score']) if pd.notna(row.get('current_score')) else None,
-                'avg7_score': float(row['avg7_score']) if pd.notna(row.get('avg7_score')) else None,
+                'close_price': _f('close_price'),
+                'current_score': _f('current_score'),
+                'avg7_score': _f('avg7_score'),
+                'prev_avg7_score': _f('prev_avg7_score') if 'prev_avg7_score' in row else None,
+                'finance_score': _f('finance_score') if 'finance_score' in row else None,
                 'signal': str(row.get('signal', '') or ''),
             })
-        return {"date": file_date, "count": len(records), "data": records}
+        return {
+            "date": file_date,
+            "version": version,
+            "strategy_name": strategy.name,
+            "count": len(records),
+            "data": records,
+        }
+    except ValueError as e:
+        return safe_error_response(e, status_code=400)
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        return safe_error_response(e, status_code=500)
+
+
+@app.get("/api/v1/strategies/versions")
+async def list_strategy_versions():
+    """列出所有可用信号版本（前端下拉框渲染用）"""
+    from src.backtest.strategies import list_strategies, DEFAULT_STRATEGY_VERSION
+    versions = list_strategies()
+    return {"default": DEFAULT_STRATEGY_VERSION, "versions": versions}
+
+
+@app.get("/api/v1/trading-strategies")
+async def list_trading_strategies():
+    """列出所有交易策略模板（前端下拉框渲染用）"""
+    try:
+        from src.portfolio.database import PortfolioDB
+        db = PortfolioDB()
+        strategies = db.list_strategies()
+        return {"strategies": strategies or []}
+    except Exception as e:
+        return safe_error_response(e, status_code=500)
+
+
+@app.get("/api/v1/strategies/active")
+async def get_active_strategy():
+    """获取当前活跃配置（信号版本 + 交易策略合并后）"""
+    from src.backtest.strategies import get_active_config
+    return get_active_config()
+
+
+@app.put("/api/v1/strategies/active")
+async def update_active_strategy(req: dict):
+    """更新活跃配置（前端选择交易策略后调用）"""
+    from src.backtest.strategies import update_active_config, switch_signal_version
+
+    # 如果包含信号版本切换
+    if 'signal_version' in req:
+        switch_signal_version(req.pop('signal_version'))
+
+    # 更新交易策略参数
+    if req:
+        update_active_config(req)
+
+    from src.backtest.strategies import get_active_config
+    return {"success": True, "config": get_active_config()}
 
 
 @app.get("/api/v1/scores/latest")
@@ -1162,4 +1266,4 @@ async def get_latest_scores(n: int = None):
             records.append(r)
         return {"date": file_date, "count": len(records), "data": records}
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        return safe_error_response(e, status_code=500)

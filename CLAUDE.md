@@ -3,7 +3,7 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## 项目状态
-**已完成** — 9因子评分系统已完整构建，总分100分
+**已完成** — 9因子评分系统 + 信号监控系统 + 持仓管理系统
 
 ## 常用命令
 
@@ -83,8 +83,15 @@ AKShare API → data/daily_market/ → data/price/*.csv (个股)
 ```
 web/
 ├── financial-report/    # → /  财报评分（Vue 3 + Vite + ECharts）
-└── stock-alert/         # → /yujing/  个股评分预警图（Vue 3 + Vite + ECharts）
+├── stock-alert/         # → /yujing/  个股评分预警图（Vue 3 + Vite + ECharts）
+└── stock-system/        # → stock.auto-claw.top  股票操作系统（信号监控+持仓管理）
 ```
+
+**股票操作系统** (`stock.auto-claw.top`):
+- **信号监控**: v1(每日触发) / v2(首次突破) 两种策略，按财报分数/7日均分排序
+- **持仓管理**: 模拟/实盘账户，买入/卖出记录，止盈止损
+- **收益统计**: 收益曲线、月度统计、夏普比率
+- **策略管理**: v1/v2 策略切换，参数配置
 
 **财报评分** (`/`):
 - **页面路由**:
@@ -113,8 +120,11 @@ scripts/evening_pipeline.sh
 串联执行：批量评分 → kline_analyzer → 每日报告，任一步失败会停在该步。
 Cron: `0 19 * * 1-5`
 
-### 待完成模块
-- **回测引擎**: `src/core/backtest.py` — 目前仅有占位函数
+### 回测系统
+- **策略注册**: `src/backtest/strategies.py` — v1(每日触发) / v2(首次突破)
+- **历史评分**: `src/backtest/scorer.py` — 5因子 point-in-time 评分
+- **回测引擎**: `src/backtest/engine.py` — scored/live 两种模式
+- **信号计算**: `scripts/calc_signals.py` — 每日信号生成（支持策略版本切换）
 
 ## 数据存储
 - `data/price/*.csv` — 历史日线价格（日期、收盘价、成交额、开盘、最高、最低）
@@ -126,25 +136,32 @@ Cron: `0 19 * * 1-5`
 - `data/fund/` — 5日资金流向数据
 - `data/industry/` — 行业映射+涨跌幅（申万二级）
 - `data/disclosure/*.csv` — 财报披露日期缓存（智能过期）
-- `result/score_price_history.csv` — 评分-价格历史大表（kline_analyzer 生成）
-- `result/daily_score/batch_result_*.csv` — 每日批量评分结果
+- `result/score_price_history.csv` — 评分-价格历史大表（含 finance_score 列）
+- `result/daily_score/batch_result_*.csv` — 每日批量评分结果（唯一权威数据源）
+- `result/signals/v1/` — v1 策略信号（每日触发）
+- `result/signals/v2/` — v2 策略信号（首次突破）
+- `data/portfolio.db` — 持仓管理数据库
 
 ## 关键文件
-- `main.py` — 评分入口（单股/批量）
+- `main.py` — 评分入口（单股/批量），输出到 `result/daily_score/`
 - `src/core/factor_manager.py` — 因子动态加载入口
 - `src/datafactory/data_manager.py` — 数据统一访问接口
 - `src/datafactory/build_industry_data.py` — 行业数据构建（申万二级）
 - `src/factors/financial_factor.py` — 财报评分因子（满分20）
 - `src/factors/daily_change_factor.py` — 单日涨跌幅因子（满分10）
-- `src/analyzer/kline_analyzer.py` — 评分-价格历史表生成器
+- `src/analyzer/kline_analyzer.py` — 评分-价格历史表生成器（含 finance_score）
+- `src/backtest/strategies.py` — 策略注册表（v1/v2）
 - `api/main.py` — FastAPI 后端服务
+- `scripts/calc_signals.py` — 每日信号计算（支持 v1/v2 策略）
 - `scripts/evening_pipeline.sh` — 每日晚间流水线
 - `scripts/daily_report.py` — 每日报告生成
+- `scripts/stock_analysis.py` — 个股深度分析报告
 - `scripts/start_financial_score.sh` — 服务启动脚本
 - `web/financial-report/src/views/Home.vue` — 财报评分首页
 - `web/financial-report/src/views/Detail.vue` — 财报评分详情页
 - `web/stock-alert/src/views/StockKline.vue` — 个股预警K线图
 - `web/stock-alert/src/data/loader.js` — 预警数据加载
+- `web/stock-system/src/views/Signals.vue` — 信号监控页面（含财报分数排序）
 
 ## 评分指标与权重
 | 指标 | 权重 | 正增长满分 | 负增长封顶 |

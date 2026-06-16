@@ -2,6 +2,57 @@
   <div class="strategies-page">
     <h1 class="page-title">⚙️ 策略管理</h1>
 
+    <!-- 信号版本（决定什么算 BUY 信号） -->
+    <div class="card">
+      <div class="card-title">
+        <span>📡</span>
+        <span>信号版本</span>
+        <span class="hint"> — 决定「什么算买入信号」，交易参数由下方交易策略控制</span>
+      </div>
+      <div class="signal-versions">
+        <div
+          v-for="v in signalVersions"
+          :key="v.id"
+          class="version-card"
+          :class="{ active: v.id === currentVersion }"
+        >
+          <div class="version-header">
+            <span class="version-tag">{{ v.id }}</span>
+            <span class="version-name">{{ v.name }}</span>
+            <span v-if="v.id === currentVersion" class="active-badge">✓ 当前激活</span>
+          </div>
+          <div class="version-desc">{{ v.description }}</div>
+          <div class="version-params">
+            <span>窗口: {{ v.lookback_days }}天</span>
+            <span v-if="v.first_break_only">首次突破</span>
+            <span v-else>每日触发</span>
+          </div>
+          <div class="version-strategy-select">
+            <label>交易策略：</label>
+            <select
+              :value="versionTradingMap[v.id] || ''"
+              @change="setVersionTrading(v.id, $event.target.value)"
+              class="select-input-sm"
+            >
+              <option value="" disabled>选择交易策略</option>
+              <option v-for="s in strategies" :key="s.id" :value="s.id">
+                {{ s.name }}（阈值≥{{ s.buy_threshold }}，止盈{{ s.take_profit*100 }}%，止损{{ s.stop_loss*100 }}%）
+              </option>
+            </select>
+          </div>
+          <div class="version-stats" v-if="v.id === 'v1'">
+            <span>三年回测: 2024 +18% · 2025 +32% · 2026 +15%</span>
+            <span>年均 +21.6% · 最差年 +14.6%</span>
+          </div>
+          <button
+            v-if="v.id !== currentVersion"
+            class="btn btn-primary btn-sm"
+            @click="activateVersion(v.id)"
+          >切换到 {{ v.id }}</button>
+        </div>
+      </div>
+    </div>
+
     <!-- 当前绑定 -->
     <div class="card">
       <div class="card-title">
@@ -126,7 +177,7 @@
         <div class="modal-body">
           <div class="form-group">
             <label>策略名称 *</label>
-            <input v-model="editForm.name" placeholder="如：稳健 / 激进 / 自定义" />
+            <input v-model="editForm.name" placeholder="如：我的策略A / 紧止损 / 宽仓位" />
           </div>
           <div class="form-row">
             <div class="form-group">
@@ -189,7 +240,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
-import { formatPercent, getChangeClass, clearAllCache } from '../data/loader.js'
+import { formatPercent, getChangeClass, clearAllCache, getStrategyVersion, setStrategyVersion, loadStrategyVersions } from '../data/loader.js'
 import { authedFetch } from '../auth.js'
 
 const API_BASE = '/api/v1'
@@ -200,6 +251,60 @@ const loadingBacktest = ref(true)
 const submitting = ref(false)
 const editError = ref('')
 const showEditModal = ref(false)
+
+// 信号版本
+const signalVersions = ref([])
+const currentVersion = ref(getStrategyVersion())
+
+// 信号版本 × 交易策略映射（localStorage 持久化）
+const TRADING_MAP_KEY = 'stock-system:version-trading-map'
+const versionTradingMap = reactive(JSON.parse(localStorage.getItem(TRADING_MAP_KEY) || '{}'))
+
+async function setVersionTrading(versionId, tradingId) {
+  versionTradingMap[versionId] = Number(tradingId)
+  localStorage.setItem(TRADING_MAP_KEY, JSON.stringify(versionTradingMap))
+
+  // 如果设置的是当前信号版本，同步交易策略到后端
+  if (versionId === currentVersion.value) {
+    const trading = strategies.value.find(s => s.id === Number(tradingId))
+    if (trading) {
+      try {
+        await authedFetch(API_BASE + '/strategies/active', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            threshold: trading.buy_threshold,
+            take_profit: trading.take_profit,
+            stop_loss: trading.stop_loss,
+            cooldown_days: trading.cooldown_days,
+            max_position_pct: trading.max_position_pct,
+            max_positions: trading.max_positions,
+          })
+        })
+      } catch (e) {
+        console.error('同步交易策略到后端失败:', e)
+      }
+    }
+  }
+}
+
+async function activateVersion(versionId) {
+  setStrategyVersion(versionId)  // 写 localStorage + 清缓存
+  currentVersion.value = versionId
+
+  // 同步到后端配置层
+  try {
+    await authedFetch(API_BASE + '/strategies/active', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ signal_version: versionId })
+    })
+  } catch (e) {
+    console.error('同步信号版本到后端失败:', e)
+  }
+
+  alert(`✅ 已切换到 ${versionId} 信号版本`)
+}
 
 const accountBindings = reactive({ SIM: null, REAL: null })
 
@@ -363,9 +468,27 @@ async function deleteStrategyConfirm(s) {
 }
 
 onMounted(async () => {
+  // 加载信号版本列表
+  try {
+    const verResp = await loadStrategyVersions()
+    signalVersions.value = verResp.versions || []
+  } catch (e) {
+    console.error('加载信号版本失败:', e)
+  }
   await fetchStrategies()
   await fetchAccountBindings()
   await fetchBacktestTop()
+
+  // 为未设置的信号版本分配默认交易策略（第一个策略）
+  if (strategies.value.length > 0) {
+    const defaultId = strategies.value.find(s => s.is_default)?.id || strategies.value[0].id
+    for (const v of signalVersions.value) {
+      if (!versionTradingMap[v.id]) {
+        versionTradingMap[v.id] = defaultId
+      }
+    }
+    localStorage.setItem(TRADING_MAP_KEY, JSON.stringify(versionTradingMap))
+  }
 })
 </script>
 
@@ -387,6 +510,120 @@ onMounted(async () => {
   border: 1px solid rgba(255, 255, 255, 0.08);
   padding: 20px;
   margin-bottom: 16px;
+}
+
+/* 信号版本卡片 */
+.signal-versions {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.version-card {
+  flex: 1;
+  min-width: 280px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 10px;
+  padding: 16px;
+  transition: all 0.2s;
+}
+
+.version-card.active {
+  border-color: #00d4ff;
+  background: rgba(0,212,255,0.06);
+  box-shadow: 0 0 12px rgba(0,212,255,0.15);
+}
+
+.version-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.version-tag {
+  background: #7b68ee;
+  color: white;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.version-name {
+  font-size: 16px;
+  font-weight: 600;
+  color: #e0e0e0;
+}
+
+.active-badge {
+  color: #00d4ff;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.version-desc {
+  color: #a0a0b0;
+  font-size: 13px;
+  margin-bottom: 8px;
+  line-height: 1.5;
+}
+
+.version-params {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.version-params span {
+  background: rgba(255,255,255,0.06);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: #c0c0c0;
+}
+
+.version-strategy-select {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.version-strategy-select label {
+  font-size: 12px;
+  color: #a0a0b0;
+  white-space: nowrap;
+}
+
+.select-input-sm {
+  flex: 1;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.05);
+  color: #e0e0e0;
+  font-size: 12px;
+  outline: none;
+}
+
+.select-input-sm:focus { border-color: #00d4ff; }
+
+.version-rec {
+  font-size: 13px;
+  color: #ffd700;
+  margin-bottom: 6px;
+}
+
+.version-stats {
+  font-size: 12px;
+  color: #808090;
+  margin-bottom: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .card-title {

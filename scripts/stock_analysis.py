@@ -14,7 +14,7 @@ import requests
 from datetime import datetime, timedelta
 
 # ==================== 配置 ====================
-RESULT_DIR = "/home/admin/AUTO-STOCK/src/result"
+RESULT_DIR = "/home/admin/AUTO-STOCK/result/daily_score"
 REPORT_DIR = "/home/admin/AUTO-STOCK/reports/individual"
 CACHE_FILE = "/home/admin/AUTO-STOCK/reports/individual/generated_at.json"
 POOL_FILE = "/home/admin/AUTO-STOCK/stock_pool.csv"

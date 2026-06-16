@@ -82,21 +82,53 @@ export { clearAllCache }
 
 const API_BASE = '/api/v1'
 
+// 策略版本（localStorage 记住，刷新不丢；切换时清缓存）
+const STRATEGY_VERSION_KEY = 'stock-system:strategy-version'
+
+export function getStrategyVersion() {
+  return localStorage.getItem(STRATEGY_VERSION_KEY) || 'v1'
+}
+
+export function setStrategyVersion(version) {
+  localStorage.setItem(STRATEGY_VERSION_KEY, version)
+  // 切换版本时清空所有缓存，避免跨版本串数据
+  clearAllCache()
+}
+
 // T-1 数据：信号、评分
-export async function loadSignals(forceRefresh = false) {
+export async function loadSignals(forceRefresh = false, version = getStrategyVersion()) {
   const result = await smartFetch(
-    CACHE_KEYS.SIGNALS,
+    `${CACHE_KEYS.SIGNALS}:${version}`,  // 缓存键加 version 维度
     async () => {
-      const r = await fetch(API_BASE + '/signals/latest')
+      const r = await fetch(`${API_BASE}/signals/latest?version=${version}`)
       if (!r.ok) throw new Error('HTTP ' + r.status)
       return await r.json()
     },
     { dataType: 'T1_DATA', forceRefresh }
   )
+  // smartFetch 返回 {data: apiResponse, fromCache: bool}，解包
+  const api = result.data
   return {
-    date: result.data?.date || '',
-    data: result.data?.data || []
+    date: api?.date || '',
+    version: api?.version || version,
+    strategyName: api?.strategy_name || '',
+    data: api?.data || []
   }
+}
+
+// 列出所有可用信号版本（前端下拉框渲染用）
+export async function loadStrategyVersions(forceRefresh = false) {
+  const result = await smartFetch(
+    CACHE_KEYS.STRATEGY_VERSIONS,
+    async () => {
+      const r = await fetch(`${API_BASE}/strategies/versions`)
+      if (!r.ok) throw new Error('HTTP ' + r.status)
+      return await r.json()
+    },
+    { dataType: 'T1_DATA', forceRefresh }
+  )
+  // smartFetch 返回 {data: apiResponse, fromCache: bool}，解包
+  return result.data
 }
 
 export async function loadLatestScores(forceRefresh = false) {

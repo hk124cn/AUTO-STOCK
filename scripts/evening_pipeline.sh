@@ -46,6 +46,17 @@ if [ -f "reports/daily_report_${TARGET_DATE}.html" ]; then
 fi
 echo "✅  每日报告完成"
 
+# 步骤4: 计算信号（v1 + v2）
+step 4 "计算每日信号(v1+v2)"
+python3 scripts/calc_signals.py --strategy-version v1 || fail "calc_signals v1"
+python3 scripts/calc_signals.py --strategy-version v2 || fail "calc_signals v2"
+echo "✅  信号计算完成"
+
+# 步骤5: 模拟交易（dry-run 模式，只打印不执行）
+step 5 "模拟交易检查(dry-run)"
+python3 scripts/sim_trader.py --date "$TARGET_DATE" --dry-run || echo "⚠️  sim_trader dry-run 异常（非致命）"
+echo "✅  模拟交易检查完成"
+
 end_time=$(date +%s)
 elapsed=$(( end_time - start_time ))
 echo ""
