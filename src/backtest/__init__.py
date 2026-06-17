@@ -4,11 +4,22 @@
 #   - signal: 信号触发策略（评分达到阈值触发买卖信号）
 #
 # 策略版本注册（2026-06-15 起）:
-from .strategies import STRATEGIES, get_strategy, list_strategies, Strategy
+from .strategies import (
+    get_strategy,
+    list_strategies,
+    get_active_config,
+    update_active_config,
+    switch_signal_version,
+    DEFAULT_STRATEGY_VERSION,
+    SIGNAL_VERSIONS,
+)
 
 __all__ = [
-    "STRATEGIES",
     "get_strategy",
     "list_strategies",
-    "Strategy",
+    "get_active_config",
+    "update_active_config",
+    "switch_signal_version",
+    "DEFAULT_STRATEGY_VERSION",
+    "SIGNAL_VERSIONS",
 ]
