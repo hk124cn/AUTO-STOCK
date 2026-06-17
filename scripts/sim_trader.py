@@ -45,7 +45,7 @@ def run_auto_trade(date: str, dry_run: bool = False, mode: str = 'SIM',
     strategy = get_strategy(strategy_version)
 
     # 1. 加载信号（按版本分目录）
-    sig_file = ROOT / "result" / "signals" / strategy.output_subdir / f"signals_{date}.csv"
+    sig_file = ROOT / "result" / "signals" / strategy['output_subdir'] / f"signals_{date}.csv"
     if not sig_file.exists():
         print(f"❌ {sig_file} 不存在，请先运行 calc_signals.py --strategy-version {strategy_version}")
         return
@@ -59,9 +59,8 @@ def run_auto_trade(date: str, dry_run: bool = False, mode: str = 'SIM',
     score_history = pd.read_csv(sh_path, dtype={'code': str})
 
     # 3. 初始化
-    from src.backtest.strategies import get_active_config, switch_signal_version
-    switch_signal_version(strategy_version)
-    config = get_active_config()
+    from src.backtest.strategies import get_config_for_version
+    config = get_config_for_version(strategy_version)
 
     tm = TradingManager(mode=mode)
     account = tm.get_account()
@@ -167,19 +166,6 @@ def run_auto_trade(date: str, dry_run: bool = False, mode: str = 'SIM',
     print(f"  现金:   ¥{snapshot['cash']:.2f}")
     print(f"  持仓:   ¥{snapshot['position_value']:.2f}")
     print(f"  净值:   {snapshot['nav']:.4f}")
-
-    # 8. 同日双触达弹窗提示
-    if both_triggered:
-        print("\n" + "=" * 50)
-        print("⚠️  同日双触达警告（保守=止损优先）")
-        print("=" * 50)
-        for t in both_triggered:
-            print(f"  {t['code']} {t['name']} 在 {t['trigger_date']} 出现同一天内")
-            print(f"    最高: ≥ {t['target_tp']:.2f}（止盈）")
-            print(f"    最低: ≤ {t['target_sl']:.2f}（止损）")
-            print(f"    已按保守原则（止损优先）记录")
-            print(f"    如有疑问，请手动调整")
-        print("=" * 50)
 
 
 def main():

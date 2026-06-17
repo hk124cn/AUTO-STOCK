@@ -592,22 +592,47 @@ class TradingManager:
                 )
                 # 撤销 trade_lots 卖出记录
                 c.execute(
-                    "SELECT id, sell_shares, sell_price FROM trade_lots WHERE account_id = ? AND code = ? AND sell_date = ? ORDER BY id ASC",
+                    "SELECT id, buy_shares, remaining_shares, sell_shares, sell_price FROM trade_lots WHERE account_id = ? AND code = ? AND sell_date = ? ORDER BY id ASC",
                     (acc_id, code, trade['trade_date'])
                 )
+                remaining_to_restore = trade['shares']
+                restored_shares = 0
                 for lot in c.fetchall():
-                    if trade['shares'] <= 0:
+                    if remaining_to_restore <= 0:
                         break
                     lot = dict(lot)
-                    take = min(trade['shares'], lot['sell_shares'])
-                    new_remaining = lot['buy_shares'] - lot['sell_shares'] + take
-                    if new_remaining >= lot['buy_shares']:
-                        c.execute("DELETE FROM trade_lots WHERE id = ?", (lot['id'],))
+                    take = min(remaining_to_restore, lot['sell_shares'])
+                    new_remaining = lot['remaining_shares'] + take
+                    new_sell_shares = lot['sell_shares'] - take
+                    if new_sell_shares <= 0:
+                        c.execute(
+                            "UPDATE trade_lots SET remaining_shares = ?, sell_shares = 0, sell_date = NULL, sell_price = NULL, updated_at = datetime('now', 'localtime') WHERE id = ?",
+                            (new_remaining, lot['id'])
+                        )
                     else:
                         c.execute(
-                            "UPDATE trade_lots SET remaining_shares = ?, sell_shares = sell_shares - ?, sell_date = NULL, sell_price = NULL WHERE id = ?",
-                            (new_remaining, take, lot['id'])
+                            "UPDATE trade_lots SET remaining_shares = ?, sell_shares = ?, updated_at = datetime('now', 'localtime') WHERE id = ?",
+                            (new_remaining, new_sell_shares, lot['id'])
                         )
+                    restored_shares += take
+                    remaining_to_restore -= take
+
+                if restored_shares > 0:
+                    c.execute(
+                        "UPDATE positions SET shares = shares + ?, closed_at = NULL, updated_at = datetime('now', 'localtime') WHERE account_id = ? AND code = ? AND closed_at IS NULL",
+                        (restored_shares, acc_id, code)
+                    )
+                    if c.rowcount == 0:
+                        c.execute(
+                            "SELECT id, shares FROM positions WHERE account_id = ? AND code = ? AND closed_at IS NOT NULL ORDER BY closed_at DESC, id DESC LIMIT 1",
+                            (acc_id, code)
+                        )
+                        pos = c.fetchone()
+                        if pos:
+                            c.execute(
+                                "UPDATE positions SET shares = ?, closed_at = NULL, updated_at = datetime('now', 'localtime') WHERE id = ?",
+                                (max(pos['shares'], restored_shares), pos['id'])
+                            )
 
             # 删除交易记录
             c.execute("DELETE FROM trades WHERE id = ?", (trade_id,))

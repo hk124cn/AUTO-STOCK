@@ -33,8 +33,8 @@ SIGNALS_BASE_DIR = ROOT_DIR / "result" / "signals"  # signals/{strategy.output_s
 
 # 策略注册表（v1/v2 在 src/backtest/strategies.py 注册；具体参数见 Strategy 数据类）
 from src.backtest.strategies import (
-    get_strategy, list_strategies, get_active_config, update_active_config,
-    switch_signal_version, DEFAULT_STRATEGY_VERSION, SIGNAL_VERSIONS,
+    get_strategy, list_strategies, get_active_config, get_config_for_version,
+    update_active_config, switch_signal_version, DEFAULT_STRATEGY_VERSION, SIGNAL_VERSIONS,
 )
 
 # 默认股票池（自选股 200 只）
@@ -113,7 +113,7 @@ def calc_moving_avg(df: pd.DataFrame, target_date: str, strategy=None,
     """
     if strategy is None:
         strategy = get_strategy(DEFAULT_STRATEGY_VERSION)
-    lookback = strategy.lookback_days
+    lookback = strategy['lookback_days']
 
     if min_periods is None:
         min_periods = lookback  # 默认需要满 lookback 天
@@ -137,7 +137,7 @@ def calc_moving_avg(df: pd.DataFrame, target_date: str, strategy=None,
     window_df = df[df['date'].isin(window_dates)]
 
     # v2 首次突破需要昨日的窗口
-    if strategy.first_break_only and target_idx >= lookback:
+    if strategy['first_break_only'] and target_idx >= lookback:
         prev_window_dates = trade_dates[target_idx - lookback:target_idx]
         prev_window_df = df[df['date'].isin(prev_window_dates)]
     else:
@@ -157,7 +157,7 @@ def calc_moving_avg(df: pd.DataFrame, target_date: str, strategy=None,
             continue
 
         # v2: 首次突破过滤——昨日 7 日均分 < 阈值且今日 ≥ 阈值
-        if strategy.first_break_only:
+        if strategy['first_break_only']:
             if prev_window_df is None:
                 continue  # 没有昨日数据 → 不视作突破
             prev_group = prev_window_df[prev_window_df['code'] == code]
@@ -200,7 +200,7 @@ def calc_moving_avg(df: pd.DataFrame, target_date: str, strategy=None,
 
     result_df = pd.DataFrame(result_rows)
     if not result_df.empty:
-        sort_col = 'finance_score' if strategy and strategy.first_break_only else 'avg7_score'
+        sort_col = 'finance_score' if strategy and strategy['first_break_only'] else 'avg7_score'
         result_df = result_df.sort_values(sort_col, ascending=False)
 
     return result_df
@@ -285,7 +285,7 @@ def save_signals(signals_df: pd.DataFrame, target_date: str, strategy=None):
     if strategy is None:
         strategy = get_strategy(DEFAULT_STRATEGY_VERSION)
 
-    signals_dir = SIGNALS_BASE_DIR / strategy.output_subdir
+    signals_dir = SIGNALS_BASE_DIR / strategy['output_subdir']
     signals_dir.mkdir(parents=True, exist_ok=True)
 
     output_file = signals_dir / f"signals_{target_date}.csv"
@@ -363,12 +363,13 @@ def check_kline_stop(code: str, cost: float, buy_date: str,
     return {'triggered': False, 'type': None, 'sell_price': 0, 'trigger_date': ''}
 
 
-def generate_sell_signals(df: pd.DataFrame, target_date: str) -> pd.DataFrame:
+def generate_sell_signals(df: pd.DataFrame, target_date: str, config: dict) -> pd.DataFrame:
     """
     检查持仓数据库，对触达止盈/止损的持仓生成 SELL 信号。
 
     读取 portfolio.db 的 SIM 账户持仓，用 K 线最高/最低价判断止盈止损。
     用 K 线扫描（与 sim_trader 一致），而非仅收盘价。
+    止盈止损参数来自 active config，保证 BUY/SELL 使用同一配置源。
     """
     try:
         from src.portfolio.database import PortfolioDB
@@ -383,13 +384,9 @@ def generate_sell_signals(df: pd.DataFrame, target_date: str) -> pd.DataFrame:
 
     account_id = sim_account['id']
 
-    # 获取策略参数
-    strategy_info = db.get_strategy(sim_account.get('strategy_id')) if sim_account.get('strategy_id') else db.get_default_strategy()
-    if not strategy_info:
-        return pd.DataFrame()
-
-    take_profit = strategy_info.get('take_profit', 0.20)
-    stop_loss = strategy_info.get('stop_loss', 0.08)
+    # 获取策略参数（来自 active config，与 BUY 信号共用同一配置源）
+    take_profit = config.get('take_profit', 0.20)
+    stop_loss = config.get('stop_loss', 0.08)
 
     # 获取持仓
     positions = db.get_positions(account_id)
@@ -402,13 +399,12 @@ def generate_sell_signals(df: pd.DataFrame, target_date: str) -> pd.DataFrame:
         if not code:
             continue
 
-        buy_price = pos.get('avg_cost', 0)
+        buy_price = pos.get('cost_price', 0)
         if buy_price <= 0:
-            buy_price = pos.get('buy_price', 0)
-        if buy_price <= 0:
+            print(f"⚠️ {pos['code']} 成本价异常 ({buy_price})，跳过 SELL 检查")
             continue
 
-        buy_date = str(pos.get('buy_date', '')).replace('-', '')
+        buy_date = str(pos.get('buy_date', ''))[:10].replace('-', '')
         if not buy_date:
             continue
 
@@ -468,9 +464,8 @@ def main():
                         help='使用全市场股票（忽略 --pool）')
     args = parser.parse_args()
 
-    # 切换信号版本（更新配置层）
-    switch_signal_version(args.strategy_version)
-    config = get_active_config()
+    # 获取指定版本配置（不修改全局 active config，不写盘）
+    config = get_config_for_version(args.strategy_version)
 
     print("加载评分历史数据...")
     df = load_score_history()
@@ -498,15 +493,9 @@ def main():
     print(f"计算日期: {target_date}")
     print(f"输出目录: result/signals/{config['output_subdir']}/")
 
-    # 构建信号版本对象（兼容 calc_moving_avg 的 strategy 参数）
-    class _Strategy:
-        pass
-    strategy = _Strategy()
-    strategy.lookback_days = config['lookback_days']
-    strategy.first_break_only = config['first_break_only']
-    strategy.output_subdir = config['output_subdir']
-
-    signals_df = calc_moving_avg(df, target_date, strategy=strategy,
+    # 信号版本字段已合并进 config（get_active_config 返回 SIGNAL_VERSIONS[v] + DEFAULT_TRADING_PARAMS），
+    # 直接把 config 当 strategy 传给下游函数即可（calc_moving_avg / save_signals 用 strategy['xxx'] 读）
+    signals_df = calc_moving_avg(df, target_date, strategy=config,
                                  threshold=config['threshold'], pool_codes=pool_codes)
 
     if signals_df.empty:
@@ -526,7 +515,7 @@ def main():
             print(f"冷却过滤: {before} → {after} (过滤 {before - after} 只)")
 
     # === 生成 SELL 信号（检查持仓的止盈/止损）===
-    sell_signals = generate_sell_signals(df, target_date)
+    sell_signals = generate_sell_signals(df, target_date, config)
     if not sell_signals.empty:
         # 合并 BUY 和 SELL 信号（SELL 行覆盖同 code 的 BUY 行）
         signals_df = pd.concat([signals_df, sell_signals], ignore_index=True)
@@ -554,7 +543,7 @@ def main():
                   f"价格:{row['close_price']:.2f}  "
                   f"原因:{row.get('sell_reason', '')}")
 
-    save_signals(signals_df, target_date, strategy=strategy)
+    save_signals(signals_df, target_date, strategy=config)
 
     print(f"\n完成! {len(buy_signals)} 只买入 + {len(sell_signals)} 只卖出")
 
