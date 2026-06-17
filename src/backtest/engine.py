@@ -108,7 +108,28 @@ class BacktestEngine:
         return self._run_scored()
 
     def _run_live(self) -> BacktestResult:
-        """live模式：使用 HistoricalScorer 实时计算因子"""
+        """live模式：使用 HistoricalScorer 实时计算因子
+
+        ⚠️ 已知前视偏差（look-ahead bias），仅供实验，不可用于策略评估。
+
+        与 _run_scored() 的关键差异（均未修复）：
+
+        1. T 日评分 → T 日买入（前视偏差）
+           _run_scored 用 T-1 日评分决定 T 日买入；_run_live 用 entry_date
+           当天的评分，即"看到了当天数据再决策"。
+
+        2. 无 T+1 开盘价入场（滑点缺失）
+           _run_scored 用 T+1 开盘价 + 0.1% 滑点作为入场价；_run_live
+           可能用 T 日收盘价或无滑点价格，高估实际收益。
+
+        3. 无冷却期
+           _run_scored 有 cooldown_days 逻辑（最近卖出过的股票冷却期内不买）；
+           _run_live 没有，可能导致频繁买卖同一只股票。
+
+        后果：live 模式的回测收益率会系统性高于实际可实现收益，夏普比率
+        失真。修复需将 T-1/T+1/冷却期逻辑从 _run_scored 同步到 _run_live，
+        预计 1-2h 工作量。
+        """
         from src.backtest.scorer import HistoricalScorer, precompute_scores
 
         cfg = self.config

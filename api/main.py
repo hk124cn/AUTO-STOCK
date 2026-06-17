@@ -1023,6 +1023,30 @@ async def create_strategy(req: StrategyRequest):
         return safe_error_response(e, status_code=500)
 
 
+@app.get("/api/v1/strategies/active")
+async def get_active_strategy():
+    """获取当前活跃配置（信号版本 + 交易策略合并后）"""
+    from src.backtest.strategies import get_active_config
+    return get_active_config()
+
+
+@app.put("/api/v1/strategies/active", dependencies=[Depends(verify_token)])
+async def update_active_strategy(req: dict):
+    """更新活跃配置（前端选择交易策略后调用）"""
+    from src.backtest.strategies import update_active_config, switch_signal_version
+
+    # 如果包含信号版本切换
+    if 'signal_version' in req:
+        switch_signal_version(req.pop('signal_version'))
+
+    # 更新交易策略参数
+    if req:
+        update_active_config(req)
+
+    from src.backtest.strategies import get_active_config
+    return {"success": True, "config": get_active_config()}
+
+
 @app.put("/api/v1/strategies/{strategy_id}", dependencies=[Depends(verify_token)])
 async def update_strategy(strategy_id: int, req: StrategyUpdateRequest):
     """更新策略"""
@@ -1056,10 +1080,23 @@ async def get_account_strategy(mode: str = 'SIM'):
 
 @app.post("/api/v1/portfolio/strategy", dependencies=[Depends(verify_token)])
 async def set_account_strategy(req: SetAccountStrategyRequest):
-    """设置账户的策略"""
+    """设置账户的策略，并同步交易策略参数到 active config"""
     try:
         db = get_db()
-        return db.set_account_strategy(req.account_id, req.strategy_id)
+        result = db.set_account_strategy(req.account_id, req.strategy_id)
+        # 同步 DB 策略参数到 active config（保证 calc_signals BUY/SELL 使用同一配置源）
+        strategy = db.get_strategy(req.strategy_id)
+        if strategy:
+            from src.backtest.strategies import update_active_config
+            update_active_config({
+                'threshold': strategy['buy_threshold'],
+                'take_profit': strategy['take_profit'],
+                'stop_loss': strategy['stop_loss'],
+                'cooldown_days': strategy['cooldown_days'],
+                'max_position_pct': strategy['max_position_pct'],
+                'max_positions': strategy['max_positions'],
+            })
+        return result
     except Exception as e:
         return safe_error_response(e, status_code=500)
 
@@ -1138,7 +1175,7 @@ async def get_latest_signals(version: str = "v1"):
     try:
         from src.backtest.strategies import get_strategy
         strategy = get_strategy(version)  # 未知版本直接抛 500
-        signals_dir = Path(__file__).parent.parent / "result" / "signals" / strategy.output_subdir
+        signals_dir = Path(__file__).parent.parent / "result" / "signals" / strategy['output_subdir']
         # 优先 signals_latest.csv，否则取最新 signals_YYYYMMDD.csv
         signal_file = signals_dir / "signals_latest.csv"
         if not signal_file.exists():
@@ -1183,7 +1220,7 @@ async def get_latest_signals(version: str = "v1"):
         return {
             "date": file_date,
             "version": version,
-            "strategy_name": strategy.name,
+            "strategy_name": strategy['name'],
             "count": len(records),
             "data": records,
         }
@@ -1211,30 +1248,6 @@ async def list_trading_strategies():
         return {"strategies": strategies or []}
     except Exception as e:
         return safe_error_response(e, status_code=500)
-
-
-@app.get("/api/v1/strategies/active")
-async def get_active_strategy():
-    """获取当前活跃配置（信号版本 + 交易策略合并后）"""
-    from src.backtest.strategies import get_active_config
-    return get_active_config()
-
-
-@app.put("/api/v1/strategies/active")
-async def update_active_strategy(req: dict):
-    """更新活跃配置（前端选择交易策略后调用）"""
-    from src.backtest.strategies import update_active_config, switch_signal_version
-
-    # 如果包含信号版本切换
-    if 'signal_version' in req:
-        switch_signal_version(req.pop('signal_version'))
-
-    # 更新交易策略参数
-    if req:
-        update_active_config(req)
-
-    from src.backtest.strategies import get_active_config
-    return {"success": True, "config": get_active_config()}
 
 
 @app.get("/api/v1/scores/latest")

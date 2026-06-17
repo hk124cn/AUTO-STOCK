@@ -181,6 +181,16 @@ class PortfolioDB:
             c.execute("CREATE INDEX IF NOT EXISTS idx_positions_account_code ON positions(account_id, code)")
             c.execute("CREATE INDEX IF NOT EXISTS idx_accounts_mode ON accounts(mode)")
 
+            # 兼容旧库：CREATE TABLE IF NOT EXISTS 不会为已存在表补列
+            for stmt in [
+                "ALTER TABLE accounts ADD COLUMN strategy_id INTEGER",
+            ]:
+                try:
+                    c.execute(stmt)
+                except sqlite3.OperationalError as e:
+                    if "duplicate column name" not in str(e).lower():
+                        raise
+
     def create_account(self, name: str, mode: str = 'SIM', initial_capital: float = 1000000,
                       strategy_id: int = None) -> int:
         """创建账户（mode: SIM=模拟仓, REAL=实盘）"""

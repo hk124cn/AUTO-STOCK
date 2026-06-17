@@ -147,6 +147,28 @@ class SignalEngine:
 
     def run(self, all_scores: dict, trade_dates: list,
             price_cache: dict, name_map: dict) -> SignalResult:
+        """执行信号策略回测
+
+        ⚠️ 已知前视偏差（look-ahead bias），仅供实验，不可用于策略评估。
+
+        与 engine.py _run_scored() 的关键差异（均未修复）：
+
+        1. T 日评分 → T 日买入（前视偏差）
+           _run_scored 用 T-1 日评分决定 T 日买入；本方法用当天评分
+           score_dicts.get(date) 直接取 entry_date 当天数据，即"看到了
+           当天数据再决策"。
+
+        2. 无 T+1 开盘价入场 + 滑点
+           _run_scored 用 T+1 开盘价 + 0.1% 滑点作为入场价；本方法用
+           get_price(code, date) 取 T 日收盘价，无滑点。高估实际收益。
+
+        3. 已有冷却期 ✅
+           cooldown_days 逻辑已实现（line 225-226, 282）。
+
+        后果：回测收益率会系统性高于实际可实现收益，夏普比率失真。
+        修复需将 T-1 评分 + T+1 开盘价 + 滑点逻辑同步到本方法，
+        预计 1-2h 工作量。
+        """
         cfg = self.config
 
         if cfg.start_date:

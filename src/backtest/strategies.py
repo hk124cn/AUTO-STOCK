@@ -18,6 +18,8 @@ calc_signals / sim_trader 只读 get_active_config()，一个数据源。
     update_active_config({'threshold': 40, 'take_profit': 0.15, ...})
 """
 
+import json
+from pathlib import Path
 from typing import Dict, List
 
 
@@ -55,12 +57,42 @@ DEFAULT_TRADING_PARAMS = {
 # 默认信号版本
 DEFAULT_STRATEGY_VERSION = "v1"
 
+_ACTIVE_CONFIG_FILE = Path(__file__).resolve().parents[2] / "data" / "active_config.json"
+
+
 # === 运行时配置（进程级，前端选择后更新） ===
-# 初始化为 v1 默认值 + 默认交易策略
-_active_config: dict = {
-    **SIGNAL_VERSIONS["v1"],
-    **DEFAULT_TRADING_PARAMS,
-}
+def _default_active_config() -> dict:
+    return {
+        **SIGNAL_VERSIONS[DEFAULT_STRATEGY_VERSION],
+        **DEFAULT_TRADING_PARAMS,
+    }
+
+
+def _load_active_config() -> dict:
+    config = _default_active_config()
+    if not _ACTIVE_CONFIG_FILE.exists():
+        return config
+
+    try:
+        loaded = json.loads(_ACTIVE_CONFIG_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return config
+
+    if isinstance(loaded, dict):
+        config.update(loaded)
+    return config
+
+
+def _save_active_config() -> None:
+    _ACTIVE_CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _ACTIVE_CONFIG_FILE.write_text(
+        json.dumps(_active_config, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+# 初始化为持久化配置；文件不存在或损坏时回退 v1 默认值 + 默认交易策略
+_active_config: dict = _load_active_config()
 
 
 def get_strategy(version: str) -> dict:
@@ -101,11 +133,21 @@ def update_active_config(params: dict) -> dict:
     """
     global _active_config
     _active_config.update(params)
+    _save_active_config()
     return get_active_config()
 
 
+def get_config_for_version(version: str) -> dict:
+    """获取指定信号版本的合并配置（不修改全局状态、不写盘）
+
+    用于 CLI（calc_signals/sim_trader）按指定版本运行，不覆盖前端选择。
+    """
+    ver = get_strategy(version)
+    return {**_active_config, **ver}
+
+
 def switch_signal_version(version: str) -> dict:
-    """切换信号版本（更新信号相关字段，保留交易策略参数）
+    """切换信号版本（更新信号相关字段，保留交易策略参数，写盘持久化）
 
     Args:
         version: 'v1' / 'v2'
@@ -124,4 +166,5 @@ def switch_signal_version(version: str) -> dict:
         'first_break_only': ver['first_break_only'],
         'output_subdir': ver['output_subdir'],
     })
+    _save_active_config()
     return get_active_config()
