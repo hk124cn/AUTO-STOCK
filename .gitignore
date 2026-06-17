@@ -66,10 +66,11 @@ private.*
 # 用户反馈（含真实 IP，不进 git）
 feedbacks.json
 
-# 运行时数据库（持仓数据）
+# 运行时数据库/配置（持仓数据、当前策略选择）
 data/portfolio.db
 data/portfolio.db-shm
 data/portfolio.db-wal
+data/active_config.json
 
 # 第三方依赖
 miniprogram/node_modules/
