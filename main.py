@@ -84,12 +84,36 @@ def run_batch(csv_file,in_fname):
     cols = ["code", "name"] + [c for c in result_df.columns if c not in ["code", "name"]]
     result_df = result_df[cols]
     result_df = result_df.sort_values(by="total_score", ascending=False)
-    if in_fname =='':
-        filename = f"./result/daily_score/batch_result_{datetime.today().strftime('%Y%m%d')}.csv"
+    output_dir = os.path.abspath("./result/daily_score")
+    os.makedirs(output_dir, exist_ok=True)
+    if in_fname == '':
+        safe_name = f"batch_result_{datetime.today().strftime('%Y%m%d')}.csv"
     else:
-        filename = f"./result/daily_score/{in_fname}.csv"
-    result_df.to_csv(filename, index=False) 
+        safe_name = in_fname.strip()
+        if "/" in safe_name or "\\" in safe_name:
+            print(f"❌ 非法结果名（不能包含路径分隔符）: {in_fname}")
+            return
+        if safe_name in (".", ".."):
+            print(f"❌ 非法结果名: {in_fname}")
+            return
+        if not safe_name.endswith('.csv'):
+            safe_name += '.csv'
+
+    filename = os.path.abspath(os.path.join(output_dir, safe_name))
+    if not filename.startswith(output_dir + os.sep):
+        print(f"❌ 非法路径: {in_fname}")
+        return
+
+    result_df.to_csv(filename, index=False)
     print(f"批量评分完成，结果已保存在 {filename}")
+
+
+def safe_input(prompt: str, default: str = '') -> str:
+    try:
+        return input(prompt).strip()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return default
 
 
 def main():
@@ -97,15 +121,15 @@ def main():
     print("1. 单股评分")
     print("2. 批量评分")
 
-    mode = input("请输入模式编号: ").strip()
+    mode = safe_input("请输入模式编号: ")
 
     if mode == "1":
-        code = input("请输入股票代码: ").strip()
+        code = safe_input("请输入股票代码: ")
         run_single(str(code))
 
     elif mode == "2":
-        in_file = input("请输入股票池CSV路径:").strip()
-        in_fname = input("请输入结果名:").strip()
+        in_file = safe_input("请输入股票池CSV路径:")
+        in_fname = safe_input("请输入结果名:")
         run_batch(in_file,in_fname)
     else:
         print("无效输入")

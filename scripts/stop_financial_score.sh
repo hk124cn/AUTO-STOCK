@@ -3,13 +3,16 @@
 
 echo "🛑 停止财报评分系统..."
 
-# 1. 停止后端 API (只停这个项目的gunicorn)
-echo "📡 停止后端 API..."
-pkill -f "gunicorn.*api.main:app" 2>/dev/null
+API_SERVICE="${API_SERVICE:-stock-api}"
+FRONTEND_PORT="${FRONTEND_PORT:-3000}"
 
-# 2. 停止前端 (只停端口3000的vite)
+# 1. 停止后端 API（systemd service；需与 start_financial_score.sh 的 API_SERVICE 保持一致）
+echo "📡 停止后端 API (${API_SERVICE})..."
+sudo systemctl stop "${API_SERVICE}"
+
+# 2. 停止前端 (只停指定端口的 vite)
 echo "🌐 停止前端..."
-pkill -f "node.*vite.*port 3000" 2>/dev/null
+pkill -f "node.*vite.*port ${FRONTEND_PORT}" 2>/dev/null
 
 # 3. 修改 Nginx 配置直接返回维护页面
 echo "⚙️  切换到维护页面..."
@@ -51,6 +54,6 @@ sleep 1
 
 echo ""
 echo "✅ 已进入维护模式，访问 https://auto-claw.top 将显示维护页面"
-echo "   释放内存: gunicorn + vite ≈ 300-500MB"
+echo "   释放内存: ${API_SERVICE} + vite ≈ 300-500MB"
 echo ""
 echo "恢复服务命令: bash /home/admin/AUTO-STOCK/scripts/start_financial_score.sh"

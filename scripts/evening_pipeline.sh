@@ -27,6 +27,18 @@ fail() {
     exit 1
 }
 
+# 交易日检查：cron 周一到周五会覆盖法定节假日，节假日直接跳过
+if [ -f "data/calendar/trade_days.csv" ]; then
+    DATE_HUMAN=$(date -d "${TARGET_DATE}" +%Y-%m-%d 2>/dev/null || echo "$TARGET_DATE")
+    DATE_COMPACT=$(date -d "${TARGET_DATE}" +%Y%m%d 2>/dev/null || echo "$TARGET_DATE")
+    if ! grep -Eq "^(${DATE_HUMAN}|${DATE_COMPACT})(,|$)" data/calendar/trade_days.csv 2>/dev/null; then
+        echo "⏭️  ${DATE_HUMAN} 不是交易日（节假日），跳过流水线"
+        exit 0
+    fi
+else
+    echo "⚠️  交易日历文件不存在，继续执行"
+fi
+
 # 步骤1: 批量多因子评分
 step 1 "批量多因子评分"
 printf "2\nstock_pool.csv\n\n" | python3 main.py || fail "批量评分"
@@ -54,7 +66,7 @@ echo "✅  信号计算完成"
 
 # 步骤5: 模拟交易（dry-run 模式，只打印不执行）
 step 5 "模拟交易检查(dry-run)"
-python3 scripts/sim_trader.py --date "$TARGET_DATE" --dry-run || echo "⚠️  sim_trader dry-run 异常（非致命）"
+python3 scripts/sim_trader.py --date "$TARGET_DATE" --dry-run || fail "sim_trader dry-run"
 echo "✅  模拟交易检查完成"
 
 end_time=$(date +%s)
