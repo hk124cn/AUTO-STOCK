@@ -64,10 +64,10 @@ python3 scripts/calc_signals.py --strategy-version v1 || fail "calc_signals v1"
 python3 scripts/calc_signals.py --strategy-version v2 || fail "calc_signals v2"
 echo "✅  信号计算完成"
 
-# 步骤5: 模拟交易（dry-run 模式，只打印不执行）
-step 5 "模拟交易检查(dry-run)"
-python3 scripts/sim_trader.py --date "$TARGET_DATE" --dry-run || fail "sim_trader dry-run"
-echo "✅  模拟交易检查完成"
+# 步骤5: 模拟交易（实盘执行，写 portfolio.db）
+step 5 "模拟交易（实盘执行）"
+python3 scripts/sim_trader.py --date "$TARGET_DATE" || fail "sim_trader"
+echo "✅  模拟交易完成"
 
 end_time=$(date +%s)
 elapsed=$(( end_time - start_time ))
